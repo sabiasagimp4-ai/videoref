@@ -1,0 +1,56 @@
+{
+  "name": "eagle-modoki",
+  "version": "1.0.0",
+  "description": "Eagle風動画管理アプリ",
+  "author": "Sabiasagi",
+  "main": "electron-main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64",
+    "publish": "electron-builder --win --x64 --publish always"
+  },
+  "build": {
+    "appId": "com.sabiasagi.eagle-modoki",
+    "productName": "Eagle Modoki",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron-main.js",
+      "server.js",
+      "public/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Eagle Modoki"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "sabiasagimp4-ai",
+      "repo": "videoref"
+    }
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "chokidar": "^3.5.3",
+    "electron-updater": "^6.3.9",
+    "express": "^4.18.2",
+    "mime-types": "^2.1.35"
+  },
+  "devDependencies": {
+    "electron": "^41.0.3",
+    "electron-builder": "^25.1.8"
+  }
+}
