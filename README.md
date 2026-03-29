@@ -2,4 +2,4 @@
 マジでほぼ全部claudeだから許して/Eagleみたいな感じです。
 
 ## インストール方法
-Releaseからlatestの.exeをダウンロード→実行→インストール
+[Release](https://github.com/sabiasagimp4-ai/videoref/releases)からlatestの.exeをダウンロード→実行→インストール
