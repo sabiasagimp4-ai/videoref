@@ -99,7 +99,7 @@ function generateThumbnail(id, filePath) {
       const dur = parseFloat(durStr) || 10;
       const seekSec = Math.min(Math.max(dur * 0.1, 0.5), 10).toFixed(2);
 
-      const ff = spawn('ffmpeg', [
+      const ff = spawn(FFMPEG_BIN, [
         '-ss', seekSec,
         '-i', filePath,
         '-frames:v', '1',
@@ -129,7 +129,7 @@ function generateThumbnail(id, filePath) {
 
 function generateFallback(id, filePath, out, resolve) {
   generating.add(id);
-  const ff = spawn('ffmpeg', [
+  const ff = spawn(FFMPEG_BIN, [
     '-ss', '3',
     '-i', filePath,
     '-frames:v', '1',
@@ -404,7 +404,7 @@ app.get('/api/frame/:id', (req, res) => {
   const filePath = decodeId(req.params.id);
   if (!filePath || !fs.existsSync(filePath)) return res.status(404).send('Not found');
   const t = parseFloat(req.query.t) || 0;
-  const ff = spawn('ffmpeg', [
+  const ff = spawn(FFMPEG_BIN, [
     '-ss', String(t),
     '-i', filePath,
     '-frames:v', '1',
@@ -427,7 +427,7 @@ app.post('/api/set-thumb/:id', (req, res) => {
   const t = parseFloat(req.query.t) || 0;
   const out = thumbPath(req.params.id);
   thumbCache.delete(req.params.id);
-  const ff = spawn('ffmpeg', [
+  const ff = spawn(FFMPEG_BIN, [
     '-ss', String(t), '-i', filePath,
     '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '3', '-y', out
   ]);
@@ -443,20 +443,10 @@ app.post('/api/set-thumb/:id', (req, res) => {
   ff.stderr.on('data', () => {});
 });
 
-// yt-dlpのパスを解決
-const YT_DLP_PATHS = [
-  'yt-dlp',
-  'C:\\Users\\tomoj\\AppData\\Local\\Microsoft\\WinGet\\Packages\\yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe\\yt-dlp.exe',
-];
-function getYtDlpPath() {
-  for (const p of YT_DLP_PATHS) {
-    try {
-      const absPath = p.includes('\\') ? p : require('child_process').execSync('where yt-dlp 2>nul', { encoding: 'utf-8' }).trim().split('\n')[0];
-      if (fs.existsSync(absPath || p)) return absPath || p;
-    } catch (e) {}
-  }
-  return 'yt-dlp';
-}
+// ffmpeg/yt-dlp パス（環境変数 > システムPATH の優先順）
+const FFMPEG_BIN = process.env.VIDEOREF_FFMPEG || 'ffmpeg';
+const YTDLP_BIN  = process.env.VIDEOREF_YTDLP  || 'yt-dlp';
+function getYtDlpPath() { return YTDLP_BIN; }
 
 // ダウンロード中のジョブ管理
 const downloadJobs = new Map(); // id -> { process, url, status, log }
@@ -617,7 +607,7 @@ app.put('/api/settings', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`\nEagle Modoki server running on port ${PORT}`);
+  console.log(`\nvideoref server running on port ${PORT}`);
   console.log(`   Library : ${LIBRARY_PATH}`);
   console.log(`   Thumbs  : ${THUMB_DIR}`);
   // Electronメインプロセスへポートを通知

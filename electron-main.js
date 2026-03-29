@@ -1,67 +1,153 @@
-const { app, BrowserWindow, shell, Menu, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, Menu, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
-const { fork } = require('child_process');
+const { fork, execSync } = require('child_process');
 const net = require('net');
 const http = require('http');
+const fs = require('fs');
+const https = require('https');
 
 let mainWindow = null;
 let serverProcess = null;
+
+// ===== TOOL PATHS =====
+const BIN_DIR = path.join(app.getPath('userData'), 'bin');
+const FFMPEG_PATH = path.join(BIN_DIR, 'ffmpeg.exe');
+const YTDLP_PATH  = path.join(BIN_DIR, 'yt-dlp.exe');
+
+// ===== CHECK SYSTEM TOOL =====
+function checkSystemTool(cmd) {
+  try {
+    execSync('where ' + cmd, { stdio: 'ignore' });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// ===== DOWNLOAD FILE =====
+function downloadFile(url, dest, onProgress) {
+  return new Promise((resolve, reject) => {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    const file = fs.createWriteStream(dest + '.tmp');
+    const request = (urlStr) => {
+      https.get(urlStr, (res) => {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          file.destroy();
+          request(res.headers.location);
+          return;
+        }
+        if (res.statusCode !== 200) {
+          reject(new Error('HTTP ' + res.statusCode));
+          return;
+        }
+        const total = parseInt(res.headers['content-length'] || '0', 10);
+        let downloaded = 0;
+        res.on('data', (chunk) => {
+          downloaded += chunk.length;
+          if (total > 0 && onProgress) onProgress(Math.round(downloaded / total * 100));
+        });
+        res.pipe(file);
+        res.on('end', () => {
+          file.close(() => {
+            fs.renameSync(dest + '.tmp', dest);
+            resolve();
+          });
+        });
+      }).on('error', reject);
+    };
+    request(url);
+    file.on('error', reject);
+  });
+}
+
+// ===== SETUP TOOLS =====
+async function setupTools(win) {
+  const send = (msg, pct) => {
+    if (win && !win.isDestroyed()) win.webContents.send('tool-setup', { msg, pct });
+  };
+
+  // ffmpeg
+  let ffmpegOk = false;
+  if (fs.existsSync(FFMPEG_PATH)) {
+    send('ffmpeg: ローカルキャッシュを使用', 10);
+    ffmpegOk = true;
+  } else if (checkSystemTool('ffmpeg')) {
+    send('ffmpeg: システムインストール済み', 10);
+    ffmpegOk = true;
+  } else {
+    send('ffmpeg をダウンロード中...', 5);
+    try {
+      // ffmpeg Windows build (gyan.dev essentials)
+      const ffmpegUrl = 'https://github.com/BtbN/ffmpeg-builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip';
+      const zipPath = path.join(BIN_DIR, 'ffmpeg.zip');
+      fs.mkdirSync(BIN_DIR, { recursive: true });
+      await downloadFile(ffmpegUrl, zipPath, (p) => send('ffmpeg をダウンロード中... ' + p + '%', Math.round(p * 0.3)));
+      // 展開
+      send('ffmpeg を展開中...', 35);
+      execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${BIN_DIR}\\ffmpeg_tmp' -Force"`, { timeout: 60000 });
+      // ffmpeg.exeを探してコピー
+      const found = execSync(`powershell -Command "Get-ChildItem '${BIN_DIR}\\ffmpeg_tmp' -Recurse -Filter ffmpeg.exe | Select-Object -First 1 -ExpandProperty FullName"`, { encoding: 'utf-8' }).trim();
+      if (found) fs.copyFileSync(found, FFMPEG_PATH);
+      fs.rmSync(path.join(BIN_DIR, 'ffmpeg_tmp'), { recursive: true, force: true });
+      fs.rmSync(zipPath, { force: true });
+      ffmpegOk = fs.existsSync(FFMPEG_PATH);
+    } catch (e) {
+      console.error('ffmpeg download failed:', e.message);
+    }
+  }
+
+  // yt-dlp
+  let ytdlpOk = false;
+  if (fs.existsSync(YTDLP_PATH)) {
+    send('yt-dlp: ローカルキャッシュを使用', 50);
+    ytdlpOk = true;
+  } else if (checkSystemTool('yt-dlp')) {
+    send('yt-dlp: システムインストール済み', 50);
+    ytdlpOk = true;
+  } else {
+    send('yt-dlp をダウンロード中...', 45);
+    try {
+      fs.mkdirSync(BIN_DIR, { recursive: true });
+      await downloadFile(
+        'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe',
+        YTDLP_PATH,
+        (p) => send('yt-dlp をダウンロード中... ' + p + '%', 45 + Math.round(p * 0.4))
+      );
+      ytdlpOk = fs.existsSync(YTDLP_PATH);
+    } catch (e) {
+      console.error('yt-dlp download failed:', e.message);
+    }
+  }
+
+  send('準備完了', 100);
+  return { ffmpegOk, ytdlpOk };
+}
 
 // ===== AUTO UPDATER =====
 function setupAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
-
   autoUpdater.on('update-available', (info) => {
-    if (mainWindow) {
-      mainWindow.webContents.send('update-status', {
-        type: 'available',
-        version: info.version
-      });
-    }
+    if (mainWindow) mainWindow.webContents.send('update-status', { type: 'available', version: info.version });
   });
-
   autoUpdater.on('download-progress', (progress) => {
-    if (mainWindow) {
-      mainWindow.webContents.send('update-status', {
-        type: 'progress',
-        percent: Math.round(progress.percent)
-      });
-    }
+    if (mainWindow) mainWindow.webContents.send('update-status', { type: 'progress', percent: Math.round(progress.percent) });
   });
-
   autoUpdater.on('update-downloaded', (info) => {
-    if (mainWindow) {
-      mainWindow.webContents.send('update-status', {
-        type: 'downloaded',
-        version: info.version
-      });
-    }
+    if (mainWindow) mainWindow.webContents.send('update-status', { type: 'downloaded', version: info.version });
   });
-
-  autoUpdater.on('error', (err) => {
-    console.error('Update error:', err.message);
-  });
-
-  // 起動3秒後にチェック
-  setTimeout(() => {
-    autoUpdater.checkForUpdates().catch(e => console.error('Update check failed:', e.message));
-  }, 3000);
+  autoUpdater.on('error', (err) => console.error('Update error:', err.message));
+  setTimeout(() => autoUpdater.checkForUpdates().catch(e => console.error('Update check failed:', e.message)), 5000);
 }
 
-ipcMain.on('install-update', () => {
-  autoUpdater.quitAndInstall();
-});
+ipcMain.on('install-update', () => autoUpdater.quitAndInstall());
 
 // ===== PORT =====
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
-    srv.listen(0, '127.0.0.1', () => {
-      const port = srv.address().port;
-      srv.close(() => resolve(port));
-    });
+    srv.listen(0, '127.0.0.1', () => { const port = srv.address().port; srv.close(() => resolve(port)); });
     srv.on('error', reject);
   });
 }
@@ -70,20 +156,9 @@ function waitForServer(port, maxRetries = 40) {
   return new Promise((resolve, reject) => {
     let retries = 0;
     const check = () => {
-      const req = http.get('http://127.0.0.1:' + port + '/api/ping', (res) => {
-        resolve(port);
-      });
-      req.on('error', () => {
-        retries++;
-        if (retries >= maxRetries) reject(new Error('Server did not start'));
-        else setTimeout(check, 300);
-      });
-      req.setTimeout(500, () => {
-        req.destroy();
-        retries++;
-        if (retries >= maxRetries) reject(new Error('Server timeout'));
-        else setTimeout(check, 300);
-      });
+      const req = http.get('http://127.0.0.1:' + port + '/api/ping', () => resolve(port));
+      req.on('error', () => { retries++; if (retries >= maxRetries) reject(new Error('Server did not start')); else setTimeout(check, 300); });
+      req.setTimeout(500, () => { req.destroy(); retries++; if (retries >= maxRetries) reject(new Error('Server timeout')); else setTimeout(check, 300); });
     };
     setTimeout(check, 500);
   });
@@ -92,14 +167,18 @@ function waitForServer(port, maxRetries = 40) {
 // ===== SERVER =====
 function startServer(port, dataDir) {
   const serverPath = path.join(app.getAppPath(), 'server.js');
-  // デフォルトライブラリパスはドキュメント/EagleModoki
-  const defaultLibrary = path.join(app.getPath('documents'), 'EagleModoki');
+  const defaultLibrary = path.join(app.getPath('documents'), 'videoref');
+  // ローカルキャッシュのbinパスを環境変数で渡す
+  const ffmpegBin = fs.existsSync(FFMPEG_PATH) ? FFMPEG_PATH : (checkSystemTool('ffmpeg') ? 'ffmpeg' : 'ffmpeg');
+  const ytdlpBin  = fs.existsSync(YTDLP_PATH)  ? YTDLP_PATH  : (checkSystemTool('yt-dlp')  ? 'yt-dlp'  : 'yt-dlp');
   serverProcess = fork(serverPath, [], {
     env: {
       ...process.env,
       EAGLE_PORT: String(port),
       EAGLE_LIBRARY: defaultLibrary,
       EAGLE_DATA: dataDir,
+      VIDEOREF_FFMPEG: ffmpegBin,
+      VIDEOREF_YTDLP: ytdlpBin,
     },
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });
@@ -107,18 +186,14 @@ function startServer(port, dataDir) {
 }
 
 // ===== LOADING HTML =====
-const LOADING_HTML = `data:text/html,<!DOCTYPE html><html><head><meta charset="UTF-8"><style>*{margin:0;padding:0;box-sizing:border-box}body{background:%23161618;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,"Segoe UI",sans-serif;color:%23aaaaaf}.logo{font-size:48px;margin-bottom:20px}.title{font-size:18px;font-weight:600;color:%23e8e8ea;margin-bottom:8px}.sub{font-size:13px;margin-bottom:32px}.spinner{width:28px;height:28px;border:2px solid %232e2e32;border-top-color:%234a8fff;border-radius:50%;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}</style></head><body><div class="logo">&#x1F985;</div><div class="title">Eagle Modoki</div><div class="sub">Loading...</div><div class="spinner"></div></body></html>`;
+const LOADING_HTML = `data:text/html,<!DOCTYPE html><html><head><meta charset="UTF-8"><style>*{margin:0;padding:0;box-sizing:border-box}body{background:%23161618;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,"Segoe UI",sans-serif;color:%23aaaaaf}.logo{font-size:48px;margin-bottom:20px}.title{font-size:18px;font-weight:600;color:%23e8e8ea;margin-bottom:8px}.sub{font-size:13px;margin-bottom:32px;color:%234a8fff}.bar-wrap{width:220px;height:4px;background:%232e2e32;border-radius:2px;overflow:hidden}.bar{height:4px;background:%234a8fff;border-radius:2px;transition:width .3s;width:0%}</style></head><body><div class="logo">&#x1F3AC;</div><div class="title">videoref</div><div class="sub" id="msg">起動中...</div><div class="bar-wrap"><div class="bar" id="bar"></div></div><script>if(window.__ELECTRON__){}</script></body></html>`;
 
 // ===== WINDOW =====
 function createWindow(port) {
   mainWindow = new BrowserWindow({
     width: 1440, height: 900, minWidth: 900, minHeight: 600,
-    title: 'Eagle Modoki', backgroundColor: '#161618',
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(app.getAppPath(), 'preload.js')
-    },
+    title: 'videoref', backgroundColor: '#161618',
+    webPreferences: { nodeIntegration: false, contextIsolation: true, preload: path.join(app.getAppPath(), 'preload.js') },
     show: true,
   });
   Menu.setApplicationMenu(null);
@@ -134,10 +209,30 @@ function createWindow(port) {
 app.whenReady().then(async () => {
   try {
     const port = await getFreePort();
-    // データはAppData/Roaming/Eagle Modoki配下に保存
     const dataDir = path.join(app.getPath('userData'), 'data');
+
+    // ツールセットアップ用の一時ウィンドウ（ローディング画面）
+    mainWindow = new BrowserWindow({
+      width: 1440, height: 900, minWidth: 900, minHeight: 600,
+      title: 'videoref', backgroundColor: '#161618',
+      webPreferences: { nodeIntegration: false, contextIsolation: true, preload: path.join(app.getAppPath(), 'preload.js') },
+      show: true,
+    });
+    Menu.setApplicationMenu(null);
+    mainWindow.loadURL(LOADING_HTML);
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
+    mainWindow.on('closed', () => { mainWindow = null; });
+
+    // ツールのセットアップ（DL or スキップ）
+    await mainWindow.webContents.executeJavaScript('document.readyState').catch(() => {});
+    const tools = await setupTools(mainWindow);
+    console.log('Tools ready:', tools);
+
     startServer(port, dataDir);
-    createWindow(port);
+    waitForServer(port)
+      .then(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL('http://127.0.0.1:' + port); })
+      .catch(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL('http://127.0.0.1:' + port); });
+
     setupAutoUpdater();
   } catch (e) {
     console.error('Startup error:', e);
@@ -147,9 +242,7 @@ app.whenReady().then(async () => {
 });
 
 // ===== CLEANUP =====
-function cleanup() {
-  if (serverProcess) { serverProcess.kill('SIGTERM'); serverProcess = null; }
-}
+function cleanup() { if (serverProcess) { serverProcess.kill('SIGTERM'); serverProcess = null; } }
 app.on('window-all-closed', () => { cleanup(); if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', cleanup);
 process.on('exit', cleanup);

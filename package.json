@@ -1,7 +1,7 @@
 {
-  "name": "eagle-modoki",
-  "version": "1.0.5",
-  "description": "Eagle風動画管理アプリ",
+  "name": "videoref",
+  "version": "1.0.6",
+  "description": "動画リファレンス管理アプリ",
   "author": "Sabiasagi",
   "main": "electron-main.js",
   "scripts": {
@@ -10,14 +10,15 @@
     "publish": "electron-builder --win --x64 --publish always"
   },
   "build": {
-    "appId": "com.sabiasagi.eagle-modoki",
-    "productName": "Eagle Modoki",
+    "appId": "com.sabiasagi.videoref",
+    "productName": "videoref",
     "asar": false,
     "directories": {
       "output": "dist"
     },
     "files": [
       "electron-main.js",
+      "preload.js",
       "server.js",
       "public/**/*",
       "node_modules/**/*",
@@ -33,7 +34,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Eagle Modoki"
+      "shortcutName": "videoref"
     },
     "publish": {
       "provider": "github",

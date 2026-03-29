@@ -1,4 +1,4 @@
-﻿// ===== STATE =====
+// ===== STATE =====
 const state = {
   files: [],
   filtered: [],
