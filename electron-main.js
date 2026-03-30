@@ -6,19 +6,23 @@ const net = require('net');
 const http = require('http');
 const fs = require('fs');
 const https = require('https');
+const AdmZip = require('adm-zip');
 
 let mainWindow = null;
 let serverProcess = null;
 
 // ===== TOOL PATHS =====
+const exeExt = process.platform === 'win32' ? '.exe' : ''; // #9
 const BIN_DIR = path.join(app.getPath('userData'), 'bin');
-const FFMPEG_PATH = path.join(BIN_DIR, 'ffmpeg.exe');
-const YTDLP_PATH  = path.join(BIN_DIR, 'yt-dlp.exe');
+const FFMPEG_PATH  = path.join(BIN_DIR, 'ffmpeg' + exeExt);
+const FFPROBE_PATH = path.join(BIN_DIR, 'ffprobe' + exeExt);
+const YTDLP_PATH   = path.join(BIN_DIR, 'yt-dlp' + exeExt);
 
-// ===== CHECK SYSTEM TOOL =====
+// ===== CHECK SYSTEM TOOL ===== (#8 クロスプラットフォーム対応)
 function checkSystemTool(cmd) {
+  const which = process.platform === 'win32' ? 'where' : 'which';
   try {
-    execSync('where ' + cmd, { stdio: 'ignore' });
+    execSync(which + ' ' + cmd, { stdio: 'ignore' });
     return true;
   } catch (e) {
     return false;
@@ -83,13 +87,27 @@ async function setupTools(win) {
       const zipPath = path.join(BIN_DIR, 'ffmpeg.zip');
       fs.mkdirSync(BIN_DIR, { recursive: true });
       await downloadFile(ffmpegUrl, zipPath, (p) => send('ffmpeg をダウンロード中... ' + p + '%', Math.round(p * 0.3)));
-      // 展開
+      // adm-zip で展開 (#14 クロスプラットフォーム対応)
       send('ffmpeg を展開中...', 35);
-      execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${BIN_DIR}\\ffmpeg_tmp' -Force"`, { timeout: 60000 });
-      // ffmpeg.exeを探してコピー
-      const found = execSync(`powershell -Command "Get-ChildItem '${BIN_DIR}\\ffmpeg_tmp' -Recurse -Filter ffmpeg.exe | Select-Object -First 1 -ExpandProperty FullName"`, { encoding: 'utf-8' }).trim();
-      if (found) fs.copyFileSync(found, FFMPEG_PATH);
-      fs.rmSync(path.join(BIN_DIR, 'ffmpeg_tmp'), { recursive: true, force: true });
+      const zip = new AdmZip(zipPath);
+      const tmpDir = path.join(BIN_DIR, 'ffmpeg_tmp');
+      zip.extractAllTo(tmpDir, true);
+      // ffmpeg.exe / ffmpeg (OS問わず) を探してコピー
+      const findBin = (dir, name) => {
+        for (const entry of fs.readdirSync(dir)) {
+          const full = path.join(dir, entry);
+          if (fs.statSync(full).isDirectory()) { const r = findBin(full, name); if (r) return r; }
+          else if (entry === name) return full;
+        }
+        return null;
+      };
+      const ffmpegName = 'ffmpeg' + exeExt;
+      const ffprobeName = 'ffprobe' + exeExt;
+      const foundFfmpeg = findBin(tmpDir, ffmpegName);
+      const foundFfprobe = findBin(tmpDir, ffprobeName);
+      if (foundFfmpeg) fs.copyFileSync(foundFfmpeg, FFMPEG_PATH);
+      if (foundFfprobe) fs.copyFileSync(foundFfprobe, FFPROBE_PATH);
+      fs.rmSync(tmpDir, { recursive: true, force: true });
       fs.rmSync(zipPath, { force: true });
       ffmpegOk = fs.existsSync(FFMPEG_PATH);
     } catch (e) {
@@ -169,16 +187,18 @@ function startServer(port, dataDir) {
   const serverPath = path.join(app.getAppPath(), 'server.js');
   const defaultLibrary = path.join(app.getPath('documents'), 'videoref');
   // ローカルキャッシュのbinパスを環境変数で渡す
-  const ffmpegBin = fs.existsSync(FFMPEG_PATH) ? FFMPEG_PATH : (checkSystemTool('ffmpeg') ? 'ffmpeg' : 'ffmpeg');
-  const ytdlpBin  = fs.existsSync(YTDLP_PATH)  ? YTDLP_PATH  : (checkSystemTool('yt-dlp')  ? 'yt-dlp'  : 'yt-dlp');
+  const ffmpegBin  = fs.existsSync(FFMPEG_PATH)  ? FFMPEG_PATH  : (checkSystemTool('ffmpeg')  ? 'ffmpeg'  : 'ffmpeg');
+  const ffprobeBin = fs.existsSync(FFPROBE_PATH) ? FFPROBE_PATH : (checkSystemTool('ffprobe') ? 'ffprobe' : 'ffprobe');
+  const ytdlpBin   = fs.existsSync(YTDLP_PATH)   ? YTDLP_PATH   : (checkSystemTool('yt-dlp')  ? 'yt-dlp'  : 'yt-dlp');
   serverProcess = fork(serverPath, [], {
     env: {
       ...process.env,
       EAGLE_PORT: String(port),
       EAGLE_LIBRARY: defaultLibrary,
       EAGLE_DATA: dataDir,
-      VIDEOREF_FFMPEG: ffmpegBin,
-      VIDEOREF_YTDLP: ytdlpBin,
+      VIDEOREF_FFMPEG:  ffmpegBin,
+      VIDEOREF_FFPROBE: ffprobeBin,
+      VIDEOREF_YTDLP:   ytdlpBin,
     },
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });

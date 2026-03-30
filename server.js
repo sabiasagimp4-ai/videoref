@@ -15,12 +15,14 @@ const SETTINGS_PATH = path.join(DATA_BASE, 'settings.json');
 function loadSettings() {
   try {
     if (fs.existsSync(SETTINGS_PATH)) return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
-  } catch (e) {}
+  } catch (e) { console.error('[loadSettings] error:', e.message); }
   return {};
 }
 function saveSettings(data) {
-  fs.mkdirSync(DATA_BASE, { recursive: true });
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2));
+  try {
+    fs.mkdirSync(DATA_BASE, { recursive: true });
+    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (e) { console.error('[saveSettings] error:', e.message); }
 }
 let settings = loadSettings();
 let LIBRARY_PATH = settings.libraryPath || process.env.EAGLE_LIBRARY || 'D:\\claude\\eaglemodoki';
@@ -32,7 +34,7 @@ const AUDIO_EXTS = ['.mp3', '.wav', '.aac', '.flac', '.ogg', '.m4a'];
 // サムネイルキャッシュ
 const thumbCache = new Set();
 // 生成中IDセット
-const generating = new Set();
+const generating = new Map(); // id -> Promise (#7 Promise共有)
 // 生成キュー
 const thumbQueue = [];
 let activeWorkers = 0;
@@ -60,17 +62,36 @@ function loadMeta() {
   return {};
 }
 function saveMeta(data) {
-  fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), 'utf-8');
+  const tmp = DATA_PATH + '.tmp';
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+    fs.renameSync(tmp, DATA_PATH);
+  } catch (e) {
+    console.error('[saveMeta] error:', e.message);
+    try { fs.unlinkSync(tmp); } catch (_) {}
+  }
 }
 function generateId(filePath) {
   const rel = path.relative(LIBRARY_PATH, filePath).replace(/\\/g, '/');
   return Buffer.from(rel).toString('base64url');
 }
+function isSafePath(filePath) {
+  const normalized = path.normalize(filePath);
+  const base = path.normalize(LIBRARY_PATH);
+  return normalized.startsWith(base + path.sep) || normalized === base;
+}
 function decodeId(id) {
   try {
     const rel = Buffer.from(id, 'base64url').toString('utf-8');
-    return path.join(LIBRARY_PATH, rel);
-  } catch (e) { return null; }
+    // ../ や絶対パスを含む不正IDを拒否
+    if (rel.includes('..') || path.isAbsolute(rel)) return null;
+    const full = path.normalize(path.join(LIBRARY_PATH, rel));
+    if (!isSafePath(full)) return null;
+    return full;
+  } catch (e) {
+    console.error('[decodeId] error:', e.message);
+    return null;
+  }
 }
 
 // ===== THUMBNAIL =====
@@ -79,56 +100,40 @@ function thumbPath(id) {
 }
 
 function generateThumbnail(id, filePath) {
-  return new Promise((resolve) => {
-    if (thumbCache.has(id)) { resolve(true); return; }
-    if (generating.has(id)) { resolve(false); return; }
-
-    generating.add(id);
-    const out = thumbPath(id);
-
-    // ffprobe で動画長さを取得し、10%地点をシーク（短い動画は3秒固定）
-    const probe = spawn('ffprobe', [
-      '-v', 'error',
-      '-show_entries', 'format=duration',
-      '-of', 'default=noprint_wrappers=1:nokey=1',
-      filePath
+  if (thumbCache.has(id)) return Promise.resolve(true);
+  if (generating.has(id)) return generating.get(id); // 同一ID待機 (#7)
+  const out = thumbPath(id);
+  const promise = new Promise((resolve) => {
+    const probe = spawn(FFPROBE_BIN, [
+      '-v', 'error', '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1', filePath
     ]);
     let durStr = '';
     probe.stdout.on('data', d => durStr += d.toString());
     probe.on('close', () => {
       const dur = parseFloat(durStr) || 10;
       const seekSec = Math.min(Math.max(dur * 0.1, 0.5), 10).toFixed(2);
-
       const ff = spawn(FFMPEG_BIN, [
-        '-ss', seekSec,
-        '-i', filePath,
-        '-frames:v', '1',
-        '-vf', 'scale=320:-2',
-        '-q:v', '3',
-        '-y',
-        out
+        '-ss', seekSec, '-i', filePath,
+        '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '3', '-y', out
       ]);
       ff.on('close', (code) => {
         generating.delete(id);
-        if (code === 0 && fs.existsSync(out)) {
-          thumbCache.add(id);
-          resolve(true);
-        } else {
-          resolve(false);
-        }
+        if (code === 0 && fs.existsSync(out)) { thumbCache.add(id); resolve(true); }
+        else resolve(false);
       });
-      ff.on('error', () => { generating.delete(id); resolve(false); });
+      ff.on('error', (err) => {
+        console.error('[ffmpeg] error:', err.message);
+        generating.delete(id); resolve(false);
+      });
     });
-    probe.on('error', () => {
-      // ffprobeなしでも3秒でフォールバック
-      generating.delete(id);
-      generateFallback(id, filePath, out, resolve);
-    });
+    probe.on('error', () => generateFallback(id, filePath, out, resolve));
   });
+  generating.set(id, promise);
+  return promise;
 }
 
 function generateFallback(id, filePath, out, resolve) {
-  generating.add(id);
   const ff = spawn(FFMPEG_BIN, [
     '-ss', '3',
     '-i', filePath,
@@ -163,7 +168,7 @@ function processQueue() {
 }
 
 function enqueueThumb(id, filePath) {
-  if (thumbCache.has(id) || generating.has(id)) return;
+  if (thumbCache.has(id) || generating.has(id)) return generating.get(id);
   return new Promise(resolve => {
     thumbQueue.push({ id, filePath, resolve });
     processQueue();
@@ -187,20 +192,21 @@ function startBackgroundThumbGen(files) {
   }
 }
 
-// ===== SCAN =====
-function scanDir(dirPath, baseLib) {
+// ===== SCAN (非同期化 #13) =====
+async function scanDir(dirPath, baseLib) {
   const results = [];
   let entries;
-  try { entries = fs.readdirSync(dirPath); } catch (e) { return results; }
+  try { entries = await fs.promises.readdir(dirPath); } catch (e) { return results; }
 
   for (const name of entries) {
     if (name.startsWith('.')) continue;
     const fullPath = path.join(dirPath, name);
     let stat;
-    try { stat = fs.statSync(fullPath); } catch (e) { continue; }
+    try { stat = await fs.promises.stat(fullPath); } catch (e) { continue; }
 
     if (stat.isDirectory()) {
-      results.push(...scanDir(fullPath, baseLib));
+      const sub = await scanDir(fullPath, baseLib);
+      results.push(...sub);
     } else {
       const ext = path.extname(name).toLowerCase();
       let type = 'other';
@@ -208,7 +214,6 @@ function scanDir(dirPath, baseLib) {
       else if (IMAGE_EXTS.includes(ext)) type = 'image';
       else if (AUDIO_EXTS.includes(ext)) type = 'audio';
       if (type === 'other') continue;
-
       const id = generateId(fullPath);
       results.push({
         id, name, ext: ext.slice(1), type,
@@ -221,17 +226,16 @@ function scanDir(dirPath, baseLib) {
   return results;
 }
 
-// フォルダ以下に動画ファイルが1件でも存在するか再帰チェック
-function hasVideoFiles(dirPath) {
+async function hasVideoFiles(dirPath) {
   let entries;
-  try { entries = fs.readdirSync(dirPath); } catch (e) { return false; }
+  try { entries = await fs.promises.readdir(dirPath); } catch (e) { return false; }
   for (const entry of entries) {
     if (entry.startsWith('.')) continue;
     const full = path.join(dirPath, entry);
     try {
-      const stat = fs.statSync(full);
+      const stat = await fs.promises.stat(full);
       if (stat.isDirectory()) {
-        if (hasVideoFiles(full)) return true;
+        if (await hasVideoFiles(full)) return true;
       } else {
         if (VIDEO_EXTS.includes(path.extname(entry).toLowerCase())) return true;
       }
@@ -240,21 +244,19 @@ function hasVideoFiles(dirPath) {
   return false;
 }
 
-function getFolderTree(dirPath, baseLib) {
+async function getFolderTree(dirPath, baseLib) {
   const name = dirPath === baseLib ? 'Library' : path.basename(dirPath);
   const rel = path.relative(baseLib, dirPath).replace(/\\/g, '/') || '.';
   const node = { name, rel, children: [] };
   let entries;
-  try { entries = fs.readdirSync(dirPath); } catch (e) { return node; }
+  try { entries = await fs.promises.readdir(dirPath); } catch (e) { return node; }
   for (const entry of entries) {
     if (entry.startsWith('.')) continue;
     const full = path.join(dirPath, entry);
     try {
-      if (fs.statSync(full).isDirectory()) {
-        // 動画ファイルを持つフォルダだけ追加
-        if (hasVideoFiles(full)) {
-          node.children.push(getFolderTree(full, baseLib));
-        }
+      const stat = await fs.promises.stat(full);
+      if (stat.isDirectory() && await hasVideoFiles(full)) {
+        node.children.push(await getFolderTree(full, baseLib));
       }
     } catch (e) {}
   }
@@ -264,9 +266,9 @@ function getFolderTree(dirPath, baseLib) {
 // ===== API =====
 
 // GET /api/files
-app.get('/api/files', (req, res) => {
+app.get('/api/files', async (req, res) => {
   if (!fs.existsSync(LIBRARY_PATH)) return res.json([]);
-  const files = scanDir(LIBRARY_PATH, LIBRARY_PATH);
+  const files = await scanDir(LIBRARY_PATH, LIBRARY_PATH);
   const meta = loadMeta();
   const result = files.map(f => ({
     ...f,
@@ -322,9 +324,9 @@ app.get('/api/thumb-status', (req, res) => {
 });
 
 // GET /api/folders
-app.get('/api/folders', (req, res) => {
+app.get('/api/folders', async (req, res) => {
   if (!fs.existsSync(LIBRARY_PATH)) return res.json({ name: 'Library', rel: '.', children: [] });
-  res.json(getFolderTree(LIBRARY_PATH, LIBRARY_PATH));
+  res.json(await getFolderTree(LIBRARY_PATH, LIBRARY_PATH));
 });
 
 // GET /api/tags
@@ -443,10 +445,19 @@ app.post('/api/set-thumb/:id', (req, res) => {
   ff.stderr.on('data', () => {});
 });
 
-// ffmpeg/yt-dlp パス（環境変数 > システムPATH の優先順）
-const FFMPEG_BIN = process.env.VIDEOREF_FFMPEG || 'ffmpeg';
-const YTDLP_BIN  = process.env.VIDEOREF_YTDLP  || 'yt-dlp';
+// ffmpeg/ffprobe/yt-dlp パス（環境変数 > システムPATH の優先順）
+const FFMPEG_BIN  = process.env.VIDEOREF_FFMPEG  || 'ffmpeg';
+const FFPROBE_BIN = process.env.VIDEOREF_FFPROBE || 'ffprobe';
+const YTDLP_BIN   = process.env.VIDEOREF_YTDLP   || 'yt-dlp';
 function getYtDlpPath() { return YTDLP_BIN; }
+
+const JOB_LOG_LIMIT = 100; // ログ行数上限 (#12)
+
+// ログ追加ヘルパー
+function jobLogPush(job, line) {
+  jobLogPush(job, line);
+  if (job.log.length > JOB_LOG_LIMIT) job.log.shift();
+}
 
 // ダウンロード中のジョブ管理
 const downloadJobs = new Map(); // id -> { process, url, status, log }
@@ -458,15 +469,19 @@ app.post('/api/download', (req, res) => {
 
   const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const ytdlp = getYtDlpPath();
+
+  // 安全なテンプレ: IDベースで保存 → パストラバーサル防止 (#3)
+  // --print after_move で完了後の実ファイルパスを取得 (#11)
   const args = [
     url,
-    '--output', path.join(LIBRARY_PATH, '%(title)s.%(ext)s'),
+    '--output', path.join(LIBRARY_PATH, '%(id)s.%(ext)s'),
     '--format', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
     '--merge-output-format', 'mp4',
     '--no-playlist',
     '--progress',
     '--newline',
     '--no-warnings',
+    '--print', 'after_move:filepath',
   ];
 
   const proc = spawn(ytdlp, args, {
@@ -476,51 +491,57 @@ app.post('/api/download', (req, res) => {
   const job = { process: proc, url, status: 'downloading', log: [], progress: 0, filename: '' };
   downloadJobs.set(jobId, job);
 
-  // ダウンロード開始前のファイル一覧を記録
-  const filesBefore = new Set(
-    scanDir(LIBRARY_PATH, LIBRARY_PATH).map(f => f.relPath)
-  );
+  let downloadedFilePath = null;
 
   proc.stdout.on('data', (data) => {
     const lines = data.toString().split('\n').filter(Boolean);
     lines.forEach(line => {
-      job.log.push(line);
-      // 進捗パース: [download]  45.2% of ...
+      // --print after_move の出力は絶対パス（他の出力と区別）
+      if (line.startsWith(LIBRARY_PATH) && fs.existsSync(line.trim())) {
+        downloadedFilePath = line.trim();
+        job.filename = path.basename(downloadedFilePath);
+        return;
+      }
+      jobLogPush(job, line);
       const m = line.match(/\[download\]\s+([\d.]+)%/);
       if (m) job.progress = parseFloat(m[1]);
-      // ファイル名パース
       const fm = line.match(/\[download\] Destination: (.+)/);
-      if (fm) job.filename = path.basename(fm[1]);
+      if (fm) job.filename = path.basename(fm[1].trim());
       const mm = line.match(/\[Merger\] Merging formats into "(.+)"/);
-      if (mm) job.filename = path.basename(mm[1]);
+      if (mm) job.filename = path.basename(mm[1].trim());
     });
   });
   proc.stderr.on('data', (data) => {
-    job.log.push('[err] ' + data.toString());
+    jobLogPush(job, '[err] ' + data.toString());
   });
-  proc.on('close', (code) => {
+  proc.on('close', async (code) => {
     job.status = code === 0 ? 'done' : 'error';
     job.progress = code === 0 ? 100 : job.progress;
     if (code === 0) {
-      const filesAfter = scanDir(LIBRARY_PATH, LIBRARY_PATH).filter(f => f.type === 'video');
-      startBackgroundThumbGen(filesAfter);
-
-      // ダウンロード前に存在しなかった新しいファイルを特定
-      const newFiles = filesAfter.filter(f => !filesBefore.has(f.relPath));
-      if (newFiles.length > 0) {
+      // --print after_move で特定した実ファイルパスを使用 (#11)
+      const targetPath = downloadedFilePath;
+      if (targetPath && isSafePath(targetPath) && fs.existsSync(targetPath)) {
+        const fileId = generateId(targetPath);
         const meta = loadMeta();
-        newFiles.forEach(f => {
-          meta[f.id] = { ...(meta[f.id] || {}), url: job.url };
-          console.log(`  URL saved: ${f.name} → ${job.url}`);
-        });
+        meta[fileId] = { ...(meta[fileId] || {}), url: job.url };
         saveMeta(meta);
-        job.savedIds = newFiles.map(f => f.id);
+        job.savedIds = [fileId];
+        console.log(`  URL saved: ${path.basename(targetPath)} → ${job.url}`);
+        // サムネイル生成
+        const relPath = path.relative(LIBRARY_PATH, targetPath).replace(/\\/g, '/');
+        startBackgroundThumbGen([{ id: fileId, name: path.basename(targetPath), relPath, type: 'video' }]);
+      } else {
+        // fallback: 差分検出
+        const allFiles = await scanDir(LIBRARY_PATH, LIBRARY_PATH);
+        const filesAfter = allFiles.filter(f => f.type === 'video');
+        startBackgroundThumbGen(filesAfter);
       }
     }
   });
   proc.on('error', (err) => {
     job.status = 'error';
-    job.log.push('spawn error: ' + err.message);
+    jobLogPush(job, 'spawn error: ' + err.message);
+    console.error('[download] spawn error:', err.message);
   });
 
   res.json({ jobId });
@@ -606,7 +627,7 @@ app.put('/api/settings', (req, res) => {
   res.json({ ok: true, libraryPath: LIBRARY_PATH });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '127.0.0.1', () => {
   console.log(`\nvideoref server running on port ${PORT}`);
   console.log(`   Library : ${LIBRARY_PATH}`);
   console.log(`   Thumbs  : ${THUMB_DIR}`);
