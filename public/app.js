@@ -624,8 +624,9 @@ function showContextMenu(e, file) {
       }
     }
     if (action === 'delete') {
-      if (confirm('"' + file.name + '" \u3092\u524A\u9664\u3057\u307E\u3059\u304B\uFF1F')) {
+      if (confirm('"' + file.name + '" をゴミ箱に移動しますか？')) {
         await api('DELETE', '/files/' + file.id);
+        showToast(file.name + ' をゴミ箱に移動しました');
         await loadFiles();
       }
     }
@@ -1194,7 +1195,11 @@ if (_reBtn) _reBtn.addEventListener('click', function() { if (_paletteFile) rend
 
 var _edBtn = document.getElementById('eyedropper-btn');
 if (_edBtn) _edBtn.addEventListener('click', async function() {
-  if (!window.EyeDropper) { showToast('EyeDropper not supported'); return; }
+  if (!window.EyeDropper) {
+    var fb = document.getElementById('frame-eyedropper-btn');
+    if (fb) fb.click();
+    return;
+  }
   this.classList.add('active');
   try { var r = await (new EyeDropper()).open(); showPickedColor(r.sRGBHex); showToast(r.sRGBHex + ' picked'); } catch(e) {}
   this.classList.remove('active');
@@ -1364,6 +1369,10 @@ if (window.electronAPI) {
     } else if (data.type === 'downloaded') {
       showUpdateBanner('✅ v' + data.version + ' の準備完了', true);
     }
+  });
+  // アップデートチェック失敗通知
+  window.electronAPI.onUpdateError(function(data) {
+    showToast('アップデートの確認に失敗しました');
   });
 }
 

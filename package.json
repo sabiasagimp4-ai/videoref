@@ -1,6 +1,6 @@
 {
   "name": "videoref",
-  "version": "1.0.6",
+  "version": "1.0.8",
   "description": "動画リファレンス管理アプリ",
   "author": "Sabiasagi",
   "main": "electron-main.js",

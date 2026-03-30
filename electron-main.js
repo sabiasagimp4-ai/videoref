@@ -156,7 +156,24 @@ function setupAutoUpdater() {
     if (mainWindow) mainWindow.webContents.send('update-status', { type: 'downloaded', version: info.version });
   });
   autoUpdater.on('error', (err) => console.error('Update error:', err.message));
-  setTimeout(() => autoUpdater.checkForUpdates().catch(e => console.error('Update check failed:', e.message)), 5000);
+  // 指数バックオフリトライ: 5秒 → 30秒 → 5分 (最大3回)
+  const delays = [5000, 30000, 300000];
+  let attempt = 0;
+  function tryCheck() {
+    setTimeout(() => {
+      autoUpdater.checkForUpdates().catch(e => {
+        console.error('Update check failed (attempt ' + (attempt + 1) + '):', e.message);
+        attempt++;
+        if (attempt < delays.length) {
+          tryCheck();
+        } else {
+          console.error('Update check exhausted retries');
+          if (mainWindow) mainWindow.webContents.send('update-error', { message: e.message });
+        }
+      });
+    }, delays[attempt]);
+  }
+  tryCheck();
 }
 
 ipcMain.on('install-update', () => autoUpdater.quitAndInstall());

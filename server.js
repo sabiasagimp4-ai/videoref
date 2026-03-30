@@ -10,6 +10,8 @@ const DATA_BASE = process.env.EAGLE_DATA || path.join(__dirname, '.data');
 const DATA_PATH = path.join(DATA_BASE, 'metadata.json');
 const THUMB_DIR = path.join(DATA_BASE, 'thumbs');
 const SETTINGS_PATH = path.join(DATA_BASE, 'settings.json');
+const TRASH_DIR  = path.join(DATA_BASE, 'trash');
+const TRASH_PATH = path.join(DATA_BASE, 'trash.json');
 
 // ライブラリパスは設定ファイル > 環境変数 > デフォルト の優先順
 function loadSettings() {
@@ -71,6 +73,23 @@ function saveMeta(data) {
     try { fs.unlinkSync(tmp); } catch (_) {}
   }
 }
+function loadTrash() {
+  try {
+    if (fs.existsSync(TRASH_PATH)) return JSON.parse(fs.readFileSync(TRASH_PATH, 'utf-8'));
+  } catch (e) {}
+  return [];
+}
+function saveTrash(data) {
+  const tmp = TRASH_PATH + '.tmp';
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+    fs.renameSync(tmp, TRASH_PATH);
+  } catch (e) {
+    console.error('[saveTrash] error:', e.message);
+    try { fs.unlinkSync(tmp); } catch (_) {}
+  }
+}
+
 function generateId(filePath) {
   const rel = path.relative(LIBRARY_PATH, filePath).replace(/\\/g, '/');
   return Buffer.from(rel).toString('base64url');
@@ -383,18 +402,44 @@ app.get('/api/file/:id', (req, res) => {
   fs.createReadStream(filePath).pipe(res);
 });
 
-// DELETE /api/files/:id
+// DELETE /api/files/:id  (?permanent=true で完全削除、デフォルトはゴミ箱移動)
 app.delete('/api/files/:id', (req, res) => {
-  const filePath = decodeId(req.params.id);
+  const id = req.params.id;
+  const filePath = decodeId(id);
   if (!filePath || !fs.existsSync(filePath)) return res.status(404).send('Not found');
-  fs.unlinkSync(filePath);
+  if (req.query.permanent === 'true') {
+    fs.unlinkSync(filePath);
+  } else {
+    fs.mkdirSync(TRASH_DIR, { recursive: true });
+    const destName = id + '_' + path.basename(filePath);
+    fs.renameSync(filePath, path.join(TRASH_DIR, destName));
+    const trash = loadTrash();
+    trash.push({ id, name: path.basename(filePath), destName, deletedAt: new Date().toISOString() });
+    saveTrash(trash);
+  }
   // サムネイルも削除
-  const tp = thumbPath(req.params.id);
+  const tp = thumbPath(id);
   if (fs.existsSync(tp)) fs.unlinkSync(tp);
-  thumbCache.delete(req.params.id);
+  thumbCache.delete(id);
   const meta = loadMeta();
-  delete meta[req.params.id];
+  delete meta[id];
   saveMeta(meta);
+  res.json({ ok: true });
+});
+
+// GET /api/trash — ゴミ箱一覧
+app.get('/api/trash', (req, res) => {
+  res.json(loadTrash());
+});
+
+// DELETE /api/trash — ゴミ箱を空にする
+app.delete('/api/trash', (req, res) => {
+  const trash = loadTrash();
+  for (const item of trash) {
+    const p = path.join(TRASH_DIR, item.destName);
+    if (fs.existsSync(p)) try { fs.unlinkSync(p); } catch (e) {}
+  }
+  saveTrash([]);
   res.json({ ok: true });
 });
 
