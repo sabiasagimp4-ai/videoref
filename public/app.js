@@ -698,7 +698,8 @@ document.querySelectorAll('.nav-item').forEach(function(item) {
 
 document.getElementById('ins-url-open').addEventListener('click', function() {
   const url = document.getElementById('ins-url').value.trim();
-  if (url) window.open(url, '_blank');
+  if (!url) return; // #15 空URL防止
+  window.open(url, '_blank');
 });
 
 // ===== VIDEO MODAL FRAME MENU =====
@@ -1397,5 +1398,5 @@ function showUpdateBanner(msg, showInstall) {
   loadFiles();
 } // end initUI
 
-document.addEventListener('DOMContentLoaded', initUI);document.addEventListener('DOMContentLoaded', initUI);
+document.addEventListener('DOMContentLoaded', initUI);
 
