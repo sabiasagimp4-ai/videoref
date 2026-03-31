@@ -323,6 +323,26 @@ kbd {
 }
 .card:hover { border-color: var(--border-light); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
 .card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.card.multi-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(74, 143, 255, 0.3);
+}
+.card.multi-selected::after {
+  content: '\2713';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  z-index: 5;
+}
 
 .card-thumb {
   width: 100%; height: 100%; object-fit: cover; display: block;
