@@ -15,6 +15,8 @@ const state = {
   inspectorMeta: { tags: [], note: '', color: null, rating: 0, url: '' },
   ctxMenu: null,
   thumbPollTimer: null,
+  selectedIds: new Set(),
+  lastClickedId: null,
 };
 
 const COLOR_MAP = {
@@ -213,9 +215,43 @@ function renderGallery() {
   state.filtered.forEach(file => {
     const el = state.view === 'grid' ? createCard(file) : createListRow(file);
     if (state.selected && state.selected.id === file.id) el.classList.add('selected');
+    if (state.selectedIds.has(file.id)) el.classList.add('multi-selected');
     el.addEventListener('click', function(e) {
-      if (e.ctrlKey || e.metaKey) return;
-      selectFile(file, el);
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl/Cmd+Click: toggle in multi-selection
+        if (state.selectedIds.has(file.id)) {
+          state.selectedIds.delete(file.id);
+          el.classList.remove('multi-selected');
+        } else {
+          state.selectedIds.add(file.id);
+          el.classList.add('multi-selected');
+        }
+        state.lastClickedId = file.id;
+        updateStatus();
+      } else if (e.shiftKey && state.lastClickedId) {
+        // Shift+Click: select range from lastClickedId to this item
+        const ids = state.filtered.map(function(f) { return f.id; });
+        const fromIdx = ids.indexOf(state.lastClickedId);
+        const toIdx = ids.indexOf(file.id);
+        if (fromIdx !== -1 && toIdx !== -1) {
+          const start = Math.min(fromIdx, toIdx);
+          const end = Math.max(fromIdx, toIdx);
+          for (let i = start; i <= end; i++) {
+            state.selectedIds.add(ids[i]);
+            const cardEl = document.querySelector('[data-id="' + ids[i] + '"]');
+            if (cardEl) cardEl.classList.add('multi-selected');
+          }
+        }
+        state.lastClickedId = file.id;
+        updateStatus();
+      } else {
+        // Plain click: clear multi-selection and select single file
+        state.selectedIds.clear();
+        document.querySelectorAll('.card.multi-selected, .list-row.multi-selected').forEach(function(c) {
+          c.classList.remove('multi-selected');
+        });
+        selectFile(file, el);
+      }
     });
     el.addEventListener('dblclick', function() { openVideoModal(file); });
     el.addEventListener('contextmenu', function(e) {
@@ -385,6 +421,10 @@ function createListRow(file) {
 function updateStatus() {
   document.getElementById('status-count').textContent =
     state.filtered.length + ' items' + (state.filtered.length !== state.files.length ? ' / ' + state.files.length + ' total' : '');
+  const selEl = document.getElementById('status-selected');
+  if (selEl) {
+    selEl.textContent = state.selectedIds.size > 0 ? state.selectedIds.size + ' 件選択中' : '';
+  }
 }
 
 // ===== SELECT & INSPECTOR =====
@@ -392,11 +432,13 @@ function selectFile(file, el) {
   document.querySelectorAll('.card.selected, .list-row.selected').forEach(function(c) { c.classList.remove('selected'); });
   if (state.selected && state.selected.id === file.id) {
     state.selected = null;
+    state.lastClickedId = null;
     closeInspector();
     return;
   }
   el.classList.add('selected');
   state.selected = file;
+  state.lastClickedId = file.id;
   openInspector(file);
 }
 
@@ -561,77 +603,127 @@ function showContextMenu(e, file) {
   menu.className = 'ctx-menu';
   menu.style.left = e.clientX + 'px';
   menu.style.top = e.clientY + 'px';
-  let colMenuHtml = '';
-  if (state.collections.length > 0) {
-    colMenuHtml = '<div class="ctx-item ctx-col-parent" data-action="add-to-col">\uD83D\uDDC2 Add to Collection \u25B6</div>';
-  }
-  menu.innerHTML =
-    '<div class="ctx-item" data-action="open">\u25B6 \u52D5\u753B\u3092\u518D\u751F</div>' +
-    '<div class="ctx-item" data-action="inspector">\u24D8 Info \u3092\u958B\u304F</div>' +
-    colMenuHtml +
-    '<div class="ctx-item" data-action="rethumb">\uD83D\uDDBC \u30B5\u30E0\u30CD\u30A4\u30EB\u518D\u751F\u6210</div>' +
-    '<div class="ctx-item danger" data-action="delete">\uD83D\uDDD1 \u524A\u9664</div>';
-  menu.addEventListener('click', async function(ev) {
-    const action = ev.target.dataset.action;
-    if (action === 'open') openVideoModal(file);
-    if (action === 'inspector') {
-      const el = document.querySelector('[data-id="' + file.id + '"]');
-      if (el) selectFile(file, el);
-    }
-    if (action === 'add-to-col') {
-      // 繧ｵ繝悶Γ繝九Η繝ｼ陦ｨ遉ｺ
-      const sub = document.createElement('div');
-      sub.className = 'ctx-menu';
-      sub.style.left = (e.clientX + 160) + 'px';
-      sub.style.top = ev.target.getBoundingClientRect().top + 'px';
-      state.collections.forEach(function(col) {
-        const item = document.createElement('div');
-        item.className = 'ctx-item';
-        item.textContent = col.name;
-        item.addEventListener('click', async function() {
-          if (!col.items.includes(file.id)) {
-            col.items.push(file.id);
-            await api('PUT', '/collections/' + col.id, { items: col.items, name: col.name });
-            renderCollections();
-            showToast('"' + file.name.slice(0, 20) + '..." \u3092 ' + col.name + ' \u306B\u8FFD\u52A0');
-          }
-          sub.remove();
-          removeContextMenu();
-        });
-        sub.appendChild(item);
-      });
-      document.body.appendChild(sub);
-      setTimeout(function() { document.addEventListener('click', function rm() { sub.remove(); document.removeEventListener('click', rm); }, { once: true }); }, 0);
-      return;
-    }
-    if (action === 'rethumb') {
-      const card = document.querySelector('[data-id="' + file.id + '"]');
-      if (card) {
-        file.hasThumbnail = false;
-        card.dataset.thumbPending = '1';
-        const img = card.querySelector('img.card-video-thumb');
-        if (img) {
-          const vid = document.createElement('video');
-          vid.className = 'card-video-thumb';
-          vid.src = '/api/video/' + file.id + '#t=3';
-          vid.preload = 'metadata';
-          vid.muted = true;
-          vid.playsInline = true;
-          img.replaceWith(vid);
+
+  const isMulti = state.selectedIds.size > 1;
+
+  if (isMulti) {
+    // バッチ操作メニュー
+    const count = state.selectedIds.size;
+    menu.innerHTML =
+      '<div class="ctx-item" style="color:var(--text-3);font-size:11px;padding:5px 12px 3px;cursor:default">' + count + ' \u4EF6\u9078\u629E\u4E2D</div>' +
+      '<div class="ctx-item" data-action="tag-multi">\uD83C\uDFF7 ' + count + ' \u4EF6\u306B\u30BF\u30B0\u8FFD\u52A0</div>' +
+      '<div class="ctx-item" data-action="rating-multi">\u2605 ' + count + ' \u4EF6\u306E\u30EC\u30FC\u30C6\u30A3\u30F3\u30B0\u8A2D\u5B9A</div>' +
+      '<div class="ctx-item danger" data-action="delete-multi">\uD83D\uDDD1 ' + count + ' \u4EF6\u3092\u524A\u9664</div>';
+    menu.addEventListener('click', async function(ev) {
+      const action = ev.target.dataset.action;
+      if (action === 'tag-multi') {
+        removeContextMenu();
+        const tag = prompt('\u8FFD\u52A0\u3059\u308B\u30BF\u30B0\u3092\u5165\u529B');
+        if (tag && tag.trim()) {
+          await api('PUT', '/batch/meta', { ids: [...state.selectedIds], tags: [tag.trim()] });
+          showToast(state.selectedIds.size + ' \u4EF6\u306B\u30BF\u30B0\u3092\u8FFD\u52A0\u3057\u307E\u3057\u305F');
+          await loadFiles();
         }
-        await fetch('/api/thumb/' + file.id + '?regen=1', { method: 'HEAD' });
-        startThumbPoll();
+        return;
       }
-    }
-    if (action === 'delete') {
-      if (confirm('"' + file.name + '" をゴミ箱に移動しますか？')) {
-        await api('DELETE', '/files/' + file.id);
-        showToast(file.name + ' をゴミ箱に移動しました');
-        await loadFiles();
+      if (action === 'rating-multi') {
+        removeContextMenu();
+        const r = prompt('\u30EC\u30FC\u30C6\u30A3\u30F3\u30B0 (0-5)');
+        if (r !== null && r !== '' && !isNaN(parseInt(r))) {
+          const rating = Math.min(5, Math.max(0, parseInt(r)));
+          await api('PUT', '/batch/meta', { ids: [...state.selectedIds], rating });
+          showToast(state.selectedIds.size + ' \u4EF6\u306E\u30EC\u30FC\u30C6\u30A3\u30F3\u30B0\u3092\u8A2D\u5B9A\u3057\u307E\u3057\u305F');
+          await loadFiles();
+        }
+        return;
       }
+      if (action === 'delete-multi') {
+        if (confirm(state.selectedIds.size + ' \u4EF6\u3092\u30B4\u30DF\u7B8B\u306B\u79FB\u52D5\u3057\u307E\u3059\u304B\uFF1F')) {
+          const batchCount = state.selectedIds.size;
+          await api('DELETE', '/batch/files', { ids: [...state.selectedIds] });
+          showToast(batchCount + ' \u4EF6\u3092\u30B4\u30DF\u7B8B\u306B\u79FB\u52D5\u3057\u307E\u3057\u305F');
+          state.selectedIds.clear();
+          state.lastClickedId = null;
+          await loadFiles();
+        }
+      }
+      removeContextMenu();
+    });
+  } else {
+    // 単一ファイルメニュー
+    let colMenuHtml = '';
+    if (state.collections.length > 0) {
+      colMenuHtml = '<div class="ctx-item ctx-col-parent" data-action="add-to-col">\uD83D\uDDC2 Add to Collection \u25B6</div>';
     }
-    removeContextMenu();
-  });
+    menu.innerHTML =
+      '<div class="ctx-item" data-action="open">\u25B6 \u52D5\u753B\u3092\u518D\u751F</div>' +
+      '<div class="ctx-item" data-action="inspector">\u24D8 Info \u3092\u958B\u304F</div>' +
+      colMenuHtml +
+      '<div class="ctx-item" data-action="rethumb">\uD83D\uDDBC \u30B5\u30E0\u30CD\u30A4\u30EB\u518D\u751F\u6210</div>' +
+      '<div class="ctx-item danger" data-action="delete">\uD83D\uDDD1 \u524A\u9664</div>';
+    menu.addEventListener('click', async function(ev) {
+      const action = ev.target.dataset.action;
+      if (action === 'open') openVideoModal(file);
+      if (action === 'inspector') {
+        const el = document.querySelector('[data-id="' + file.id + '"]');
+        if (el) selectFile(file, el);
+      }
+      if (action === 'add-to-col') {
+        // サブメニュー表示
+        const sub = document.createElement('div');
+        sub.className = 'ctx-menu';
+        sub.style.left = (e.clientX + 160) + 'px';
+        sub.style.top = ev.target.getBoundingClientRect().top + 'px';
+        state.collections.forEach(function(col) {
+          const item = document.createElement('div');
+          item.className = 'ctx-item';
+          item.textContent = col.name;
+          item.addEventListener('click', async function() {
+            if (!col.items.includes(file.id)) {
+              col.items.push(file.id);
+              await api('PUT', '/collections/' + col.id, { items: col.items, name: col.name });
+              renderCollections();
+              showToast('"' + file.name.slice(0, 20) + '..." \u3092 ' + col.name + ' \u306B\u8FFD\u52A0');
+            }
+            sub.remove();
+            removeContextMenu();
+          });
+          sub.appendChild(item);
+        });
+        document.body.appendChild(sub);
+        setTimeout(function() { document.addEventListener('click', function rm() { sub.remove(); document.removeEventListener('click', rm); }, { once: true }); }, 0);
+        return;
+      }
+      if (action === 'rethumb') {
+        const card = document.querySelector('[data-id="' + file.id + '"]');
+        if (card) {
+          file.hasThumbnail = false;
+          card.dataset.thumbPending = '1';
+          const img = card.querySelector('img.card-video-thumb');
+          if (img) {
+            const vid = document.createElement('video');
+            vid.className = 'card-video-thumb';
+            vid.src = '/api/video/' + file.id + '#t=3';
+            vid.preload = 'metadata';
+            vid.muted = true;
+            vid.playsInline = true;
+            img.replaceWith(vid);
+          }
+          await fetch('/api/thumb/' + file.id + '?regen=1', { method: 'HEAD' });
+          startThumbPoll();
+        }
+      }
+      if (action === 'delete') {
+        if (confirm('"' + file.name + '" \u3092\u30B4\u30DF\u7B8B\u306B\u79FB\u52D5\u3057\u307E\u3059\u304B\uFF1F')) {
+          await api('DELETE', '/files/' + file.id);
+          showToast(file.name + ' \u3092\u30B4\u30DF\u7B8B\u306B\u79FB\u52D5\u3057\u307E\u3057\u305F');
+          await loadFiles();
+        }
+      }
+      removeContextMenu();
+    });
+  }
+
   document.body.appendChild(menu);
   state.ctxMenu = menu;
   setTimeout(function() { document.addEventListener('click', removeContextMenu, { once: true }); }, 0);
@@ -641,11 +733,179 @@ function removeContextMenu() {
   if (state.ctxMenu) { state.ctxMenu.remove(); state.ctxMenu = null; }
 }
 
+// ===== TRASH VIEW =====
+async function loadTrashView() {
+  const gallery = document.getElementById('gallery');
+  const empty = document.getElementById('empty-state');
+  const loading = document.getElementById('loading-state');
+  gallery.innerHTML = '';
+  empty.classList.add('hidden');
+  loading.classList.remove('hidden');
+
+  let items;
+  try {
+    items = await api('GET', '/trash');
+  } catch (e) {
+    loading.classList.add('hidden');
+    showToast('ゴミ箱の読み込みに失敗しました');
+    return;
+  }
+  loading.classList.add('hidden');
+
+  if (items.length === 0) {
+    empty.classList.remove('hidden');
+    const emptyTitle = document.querySelector('#empty-state .empty-title');
+    const emptySub = document.querySelector('#empty-state .empty-sub');
+    if (emptyTitle) emptyTitle.textContent = 'ゴミ箱は空です';
+    if (emptySub) emptySub.textContent = '削除したファイルはここに表示されます';
+    document.getElementById('status-count').textContent = '0 items';
+    return;
+  }
+
+  document.getElementById('status-count').textContent = items.length + ' items';
+
+  // "ゴミ箱を空にする" button row
+  const actionRow = document.createElement('div');
+  actionRow.style.cssText = 'padding:10px 16px;display:flex;align-items:center;gap:10px;';
+  const emptyAllBtn = document.createElement('button');
+  emptyAllBtn.className = 'secondary-btn';
+  emptyAllBtn.style.cssText = 'color:var(--red);border-color:var(--red);';
+  emptyAllBtn.textContent = 'ゴミ箱を空にする';
+  emptyAllBtn.addEventListener('click', async function() {
+    if (!confirm('ゴミ箱のファイルをすべて完全削除しますか？この操作は元に戻せません。')) return;
+    try {
+      await api('DELETE', '/trash');
+      showToast('ゴミ箱を空にしました');
+      loadTrashView();
+    } catch (e) {
+      showToast('エラーが発生しました: ' + e.message);
+    }
+  });
+  actionRow.appendChild(emptyAllBtn);
+  gallery.appendChild(actionRow);
+
+  // Trash item cards
+  const frag = document.createDocumentFragment();
+  items.forEach(function(item) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.position = 'relative';
+
+    // Thumb placeholder
+    const thumb = document.createElement('div');
+    thumb.className = 'card-thumb';
+    thumb.style.cssText = 'display:flex;align-items:center;justify-content:center;font-size:32px;color:var(--text-3);opacity:0.5';
+    thumb.textContent = '\uD83D\uDDD1';
+    card.appendChild(thumb);
+
+    // Ext badge
+    const extMatch = item.name.match(/\.([^.]+)$/);
+    if (extMatch) {
+      const extEl = document.createElement('div');
+      extEl.className = 'card-ext';
+      extEl.textContent = extMatch[1].toLowerCase();
+      card.appendChild(extEl);
+    }
+
+    // Overlay with name and deleted date
+    const overlay = document.createElement('div');
+    overlay.className = 'card-overlay';
+    const deletedDate = item.deletedAt ? new Date(item.deletedAt).toLocaleDateString('ja-JP') : '';
+    overlay.innerHTML = '<div class="card-name">' + item.name + '</div>' +
+      (deletedDate ? '<div style="font-size:10px;color:var(--text-3);margin-top:2px">' + deletedDate + ' 削除</div>' : '');
+    card.appendChild(overlay);
+
+    // Action buttons shown on hover
+    const btnWrap = document.createElement('div');
+    btnWrap.style.cssText = 'position:absolute;bottom:36px;left:0;right:0;display:flex;gap:4px;justify-content:center;padding:4px 6px;opacity:0;transition:opacity 0.15s;';
+    card.addEventListener('mouseenter', function() { btnWrap.style.opacity = '1'; });
+    card.addEventListener('mouseleave', function() { btnWrap.style.opacity = '0'; });
+
+    const restoreBtn = document.createElement('button');
+    restoreBtn.textContent = '復元';
+    restoreBtn.style.cssText = 'flex:1;font-size:11px;padding:4px 6px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;';
+    restoreBtn.addEventListener('click', async function(e) {
+      e.stopPropagation();
+      try {
+        await api('POST', '/trash/' + item.id + '/restore');
+        showToast(item.name + ' を復元しました');
+        // Reload the library in the background, then refresh the trash view
+        loadFiles().then(function() {
+          state.activeNav = 'trash';
+          document.getElementById('breadcrumb').textContent = 'ゴミ箱';
+          loadTrashView();
+        });
+      } catch (err) {
+        showToast('復元に失敗しました: ' + err.message);
+      }
+    });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = '完全削除';
+    deleteBtn.style.cssText = 'flex:1;font-size:11px;padding:4px 6px;background:var(--red);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;';
+    deleteBtn.addEventListener('click', async function(e) {
+      e.stopPropagation();
+      if (!confirm('"' + item.name + '" を完全削除しますか？この操作は元に戻せません。')) return;
+      try {
+        await api('DELETE', '/trash/' + item.id);
+        showToast(item.name + ' を完全削除しました');
+        loadTrashView();
+      } catch (err) {
+        showToast('削除に失敗しました: ' + err.message);
+      }
+    });
+
+    btnWrap.appendChild(restoreBtn);
+    btnWrap.appendChild(deleteBtn);
+    card.appendChild(btnWrap);
+
+    frag.appendChild(card);
+  });
+  gallery.appendChild(frag);
+}
+
 // ===== CONTROLS & INIT (DOM ready) =====
+// ===== PERSISTENT UI STATE =====
+function saveUIState() {
+  try {
+    localStorage.setItem('videoref-ui', JSON.stringify({
+      sort: state.sort,
+      view: state.view,
+      thumbSize: state.thumbSize,
+    }));
+  } catch (e) {}
+}
+
+function loadUIState() {
+  try {
+    var saved = JSON.parse(localStorage.getItem('videoref-ui'));
+    if (!saved) return;
+    if (saved.sort) state.sort = saved.sort;
+    if (saved.view) state.view = saved.view;
+    if (saved.thumbSize) state.thumbSize = saved.thumbSize;
+  } catch (e) {}
+}
+
 function initUI() {
+  loadUIState();
+
+  // Apply restored state to DOM
+  document.getElementById('sort-select').value = state.sort;
+  if (state.view === 'list') {
+    document.getElementById('view-list').classList.add('active');
+    document.getElementById('view-grid').classList.remove('active');
+  } else {
+    document.getElementById('view-grid').classList.add('active');
+    document.getElementById('view-list').classList.remove('active');
+  }
+  var zoomSlider = document.getElementById('zoom-slider');
+  zoomSlider.value = state.thumbSize;
+  document.getElementById('gallery').style.setProperty('--thumb-size', state.thumbSize + 'px');
+
   document.getElementById('zoom-slider').addEventListener('input', function(e) {
     state.thumbSize = parseInt(e.target.value);
     document.getElementById('gallery').style.setProperty('--thumb-size', state.thumbSize + 'px');
+    saveUIState();
   });
 
   var searchTimer;
@@ -664,6 +924,7 @@ document.getElementById('search-clear').addEventListener('click', function() {
 
 document.getElementById('sort-select').addEventListener('change', function(e) {
   state.sort = e.target.value;
+  saveUIState();
   applyFilters();
 });
 
@@ -672,6 +933,7 @@ document.getElementById('view-grid').addEventListener('click', function() {
   document.getElementById('gallery').className = 'grid-view';
   document.getElementById('view-grid').classList.add('active');
   document.getElementById('view-list').classList.remove('active');
+  saveUIState();
   renderGallery();
 });
 document.getElementById('view-list').addEventListener('click', function() {
@@ -679,6 +941,7 @@ document.getElementById('view-list').addEventListener('click', function() {
   document.getElementById('gallery').className = 'list-view';
   document.getElementById('view-list').classList.add('active');
   document.getElementById('view-grid').classList.remove('active');
+  saveUIState();
   renderGallery();
 });
 
@@ -686,14 +949,21 @@ document.querySelectorAll('.nav-item').forEach(function(item) {
   item.addEventListener('click', function() {
     document.querySelectorAll('.nav-item').forEach(function(i) { i.classList.remove('active'); });
     item.classList.add('active');
-    state.activeNav = item.dataset.view;
+    // Support both data-view (div) and data-nav (button) attributes
+    const navKey = item.dataset.nav || item.dataset.view;
+    state.activeNav = navKey;
     state.activeFolder = null;
     state.activeTag = null;
     document.querySelectorAll('.folder-item').forEach(function(f) { f.classList.remove('active'); });
     document.querySelectorAll('.tag-pill-nav').forEach(function(t) { t.classList.remove('active'); });
-    const labels = { all: 'Library', untagged: 'Untagged', recent: 'Recently Added' };
-    document.getElementById('breadcrumb').textContent = labels[state.activeNav] || 'Library';
-    applyFilters();
+    if (navKey === 'trash') {
+      document.getElementById('breadcrumb').textContent = 'ゴミ箱';
+      loadTrashView();
+    } else {
+      const labels = { all: 'Library', untagged: 'Untagged', recent: 'Recently Added' };
+      document.getElementById('breadcrumb').textContent = labels[navKey] || 'Library';
+      applyFilters();
+    }
   });
 });
 
@@ -1343,6 +1613,39 @@ document.addEventListener('keydown', function(e) {
       break;
     case 'd': case 'D':
       if (!modalOpen) { e.preventDefault(); openDownload(); }
+      break;
+    case 'Delete':
+    case 'Backspace':
+      if (!modalOpen) {
+        e.preventDefault();
+        if (state.selectedIds && state.selectedIds.size > 1) {
+          if (confirm(state.selectedIds.size + ' 件をゴミ箱に移動しますか？')) {
+            api('DELETE', '/batch/files', { ids: [...state.selectedIds] }).then(function() {
+              showToast(state.selectedIds.size + ' 件をゴミ箱に移動しました');
+              state.selectedIds.clear();
+              loadFiles();
+            });
+          }
+        } else if (state.selected) {
+          if (confirm('"' + state.selected.name + '" をゴミ箱に移動しますか？')) {
+            api('DELETE', '/files/' + state.selected.id).then(function() {
+              showToast(state.selected.name + ' をゴミ箱に移動しました');
+              loadFiles();
+            });
+          }
+        }
+      }
+      break;
+    case '0': case '1': case '2': case '3': case '4': case '5':
+      if (!modalOpen && state.selected) {
+        var rating = parseInt(e.key);
+        state.inspectorMeta.rating = rating;
+        document.querySelectorAll('.star').forEach(function(star) {
+          star.classList.toggle('active', parseInt(star.dataset.value) <= rating);
+        });
+        autoSave();
+        showToast('★ ' + rating);
+      }
       break;
   }
 });

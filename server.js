@@ -366,6 +366,55 @@ app.put('/api/files/:id/meta', (req, res) => {
   res.json({ ok: true });
 });
 
+// PUT /api/batch/meta — 一括メタデータ更新
+app.put('/api/batch/meta', (req, res) => {
+  const { ids, tags, rating, color } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids required' });
+  const meta = loadMeta();
+  let updated = 0;
+  for (const id of ids) {
+    if (!meta[id]) meta[id] = {};
+    if (Array.isArray(tags)) {
+      // Merge tags (add new ones, don't remove existing)
+      const existing = meta[id].tags || [];
+      const merged = [...new Set([...existing, ...tags])];
+      meta[id].tags = merged;
+    }
+    if (typeof rating === 'number') meta[id].rating = rating;
+    if (color !== undefined) meta[id].color = color;
+    updated++;
+  }
+  saveMeta(meta);
+  res.json({ ok: true, updated });
+});
+
+// DELETE /api/batch/files — 一括ゴミ箱移動
+app.delete('/api/batch/files', (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids required' });
+  fs.mkdirSync(TRASH_DIR, { recursive: true });
+  const meta = loadMeta();
+  const trash = loadTrash();
+  let deleted = 0;
+  for (const id of ids) {
+    const filePath = decodeId(id);
+    if (!filePath || !fs.existsSync(filePath)) continue;
+    const destName = id + '_' + path.basename(filePath);
+    try {
+      fs.renameSync(filePath, path.join(TRASH_DIR, destName));
+      trash.push({ id, name: path.basename(filePath), destName, deletedAt: new Date().toISOString() });
+      const tp = thumbPath(id);
+      if (fs.existsSync(tp)) fs.unlinkSync(tp);
+      thumbCache.delete(id);
+      delete meta[id];
+      deleted++;
+    } catch (e) { console.error('[batch-delete]', e.message); }
+  }
+  saveMeta(meta);
+  saveTrash(trash);
+  res.json({ ok: true, deleted });
+});
+
 // GET /api/video/:id — Range対応ストリーミング
 app.get('/api/video/:id', (req, res) => {
   const filePath = decodeId(req.params.id);
@@ -430,6 +479,39 @@ app.delete('/api/files/:id', (req, res) => {
 // GET /api/trash — ゴミ箱一覧
 app.get('/api/trash', (req, res) => {
   res.json(loadTrash());
+});
+
+// POST /api/trash/:id/restore — ゴミ箱からファイルを復元
+app.post('/api/trash/:id/restore', (req, res) => {
+  const id = req.params.id;
+  const trash = loadTrash();
+  const idx = trash.findIndex(item => item.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'Not in trash' });
+  const item = trash[idx];
+  const trashFile = path.join(TRASH_DIR, item.destName);
+  if (!fs.existsSync(trashFile)) return res.status(404).json({ error: 'File not found in trash' });
+  const originalPath = decodeId(id);
+  if (!originalPath) return res.status(400).json({ error: 'Cannot resolve original path' });
+  // Ensure parent directory exists
+  fs.mkdirSync(path.dirname(originalPath), { recursive: true });
+  fs.renameSync(trashFile, originalPath);
+  trash.splice(idx, 1);
+  saveTrash(trash);
+  res.json({ ok: true });
+});
+
+// DELETE /api/trash/:id — ゴミ箱から1件完全削除
+app.delete('/api/trash/:id', (req, res) => {
+  const id = req.params.id;
+  const trash = loadTrash();
+  const idx = trash.findIndex(item => item.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'Not in trash' });
+  const item = trash[idx];
+  const trashFile = path.join(TRASH_DIR, item.destName);
+  if (fs.existsSync(trashFile)) fs.unlinkSync(trashFile);
+  trash.splice(idx, 1);
+  saveTrash(trash);
+  res.json({ ok: true });
 });
 
 // DELETE /api/trash — ゴミ箱を空にする
@@ -500,7 +582,7 @@ const JOB_LOG_LIMIT = 100; // ログ行数上限 (#12)
 
 // ログ追加ヘルパー
 function jobLogPush(job, line) {
-  jobLogPush(job, line);
+  job.log.push(line);
   if (job.log.length > JOB_LOG_LIMIT) job.log.shift();
 }
 
