@@ -225,23 +225,6 @@ function startServer(port, dataDir) {
 // ===== LOADING HTML =====
 const LOADING_HTML = `data:text/html,<!DOCTYPE html><html><head><meta charset="UTF-8"><style>*{margin:0;padding:0;box-sizing:border-box}body{background:%23161618;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,"Segoe UI",sans-serif;color:%23aaaaaf}.logo{font-size:48px;margin-bottom:20px}.title{font-size:18px;font-weight:600;color:%23e8e8ea;margin-bottom:8px}.sub{font-size:13px;margin-bottom:32px;color:%234a8fff}.bar-wrap{width:220px;height:4px;background:%232e2e32;border-radius:2px;overflow:hidden}.bar{height:4px;background:%234a8fff;border-radius:2px;transition:width .3s;width:0%}</style></head><body><div class="logo">&#x1F3AC;</div><div class="title">videoref</div><div class="sub" id="msg">起動中...</div><div class="bar-wrap"><div class="bar" id="bar"></div></div><script>if(window.__ELECTRON__){}</script></body></html>`;
 
-// ===== WINDOW =====
-function createWindow(port) {
-  mainWindow = new BrowserWindow({
-    width: 1440, height: 900, minWidth: 900, minHeight: 600,
-    title: 'videoref', backgroundColor: '#161618',
-    webPreferences: { nodeIntegration: false, contextIsolation: true, preload: path.join(app.getAppPath(), 'preload.js') },
-    show: true,
-  });
-  Menu.setApplicationMenu(null);
-  mainWindow.loadURL(LOADING_HTML);
-  waitForServer(port)
-    .then(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL('http://127.0.0.1:' + port); })
-    .catch(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL('http://127.0.0.1:' + port); });
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
-  mainWindow.on('closed', () => { mainWindow = null; });
-}
-
 // ===== APP READY =====
 app.whenReady().then(async () => {
   try {

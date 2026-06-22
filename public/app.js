@@ -157,7 +157,7 @@ function applyFilters() {
   if (state.activeNav === 'collection' && state.activeCollection) {
     const col = state.collections.find(c => c.id === state.activeCollection);
     const ids = col ? col.items : [];
-    // 繧ｳ繝ｬ繧ｯ繧ｷ繝ｧ繝ｳ縺ｮ荳ｦ縺ｳ鬆・ｒ菫晄戟
+    // コレクションの並び順を保持
     const idOrder = {};
     ids.forEach((id, i) => { idOrder[id] = i; });
     files = files.filter(f => idOrder[f.id] !== undefined);
@@ -977,18 +977,18 @@ document.getElementById('ins-url-open').addEventListener('click', function() {
 const videoCtxMenu = document.getElementById('video-ctx-menu');
 const modalVideo = document.getElementById('modal-video');
 
-// 繝｢繝ｼ繝繝ｫ縺碁哩縺倥※縺・ｋ縺ｨ縺阪・蜿ｳ繧ｯ繝ｪ繝・け繝｡繝九Η繝ｼ繧貞・縺輔↑縺・
+// モーダルが閉じているときは右クリックメニューを出さない
 modalVideo.addEventListener('contextmenu', function(e) {
-  // 繝｢繝ｼ繝繝ｫ閾ｪ菴薙′髱櫁｡ｨ遉ｺ縺ｪ繧我ｽ輔ｂ縺励↑縺・
+  // モーダル自体が非表示なら何もしない
   if (document.getElementById('video-modal').classList.contains('hidden')) return;
   e.preventDefault();
   e.stopPropagation();
-  // 繝｢繝ｼ繝繝ｫ蜀・・逶ｸ蟇ｾ蠎ｧ讓吶〒驟咲ｽｮ
+  // モーダル内の相対座標で配置
   const modal = document.querySelector('.modal-content');
   const rect = modal.getBoundingClientRect();
   let menuX = e.clientX - rect.left;
   let menuY = e.clientY - rect.top;
-  // 逕ｻ髱｢遶ｯ縺ｫ縺ｯ縺ｿ蜃ｺ縺輔↑縺・ｈ縺・ｪｿ謨ｴ
+  // 画面端にはみ出さないよう調整
   const mw = 210, mh = 110;
   if (menuX + mw > rect.width) menuX = rect.width - mw - 8;
   if (menuY + mh > rect.height) menuY = rect.height - mh - 8;
@@ -1013,7 +1013,7 @@ videoCtxMenu.addEventListener('click', async function(e) {
   const id = state.selected.id;
 
   if (action === 'copy-frame') {
-    // canvas 縺ｫ謠冗判縺励※繧ｯ繝ｪ繝・・繝懊・繝峨∈
+    // canvas に描画してクリップボードへ
     const canvas = document.createElement('canvas');
     canvas.width = modalVideo.videoWidth;
     canvas.height = modalVideo.videoHeight;
@@ -1024,32 +1024,32 @@ videoCtxMenu.addEventListener('click', async function(e) {
         await navigator.clipboard.write([
           new ClipboardItem({ 'image/png': blob })
         ]);
-        showToast('繝輔Ξ繝ｼ繝繧偵さ繝斐・縺励∪縺励◆');
+        showToast('フレームをコピーしました');
       } catch (err) {
-        // Electron迺ｰ蠅・〒縺ｯClipboard API縺悟宛髯舌＆繧後ｋ蝣ｴ蜷・
-        // fallback: 譁ｰ縺励＞繧ｿ繝悶〒逕ｻ蜒上ｒ髢九￥
+        // Electron環境ではClipboard APIが制限される場合
+        // fallback: 新しいタブで画像を開く
         const url = URL.createObjectURL(blob);
         window.open(url, '_blank');
-        showToast('繝輔Ξ繝ｼ繝繧呈眠縺励＞繧ｿ繝悶〒髢九″縺ｾ縺励◆');
+        showToast('フレームを新しいタブで開きました');
       }
     }, 'image/png');
   }
 
   if (action === 'save-frame') {
-    // 繧ｵ繝ｼ繝舌・邨檎罰縺ｧFFmpeg繝輔Ξ繝ｼ繝繧貞叙蠕励＠縺ｦ菫晏ｭ・
+    // サーバー経由でFFmpegフレームを取得して保存
     const url = '/api/frame/' + id + '?t=' + currentTime.toFixed(3);
     const a = document.createElement('a');
     a.href = url;
     a.download = (state.selected.name.replace(/\.[^.]+$/, '')) + '_' + currentTime.toFixed(2) + 's.jpg';
     a.click();
-    showToast('繝輔Ξ繝ｼ繝繧剃ｿ晏ｭ倥＠縺ｾ縺励◆');
+    showToast('フレームを保存しました');
   }
 
   if (action === 'set-thumb') {
-    // 迴ｾ蝨ｨ繝輔Ξ繝ｼ繝繧偵し繝繝阪う繝ｫ縺ｫ險ｭ螳・
+    // 現在フレームをサムネイルに設定
     const r = await fetch('/api/set-thumb/' + id + '?t=' + currentTime.toFixed(3), { method: 'POST' });
     if (r.ok) {
-      // 繧ｮ繝｣繝ｩ繝ｪ繝ｼ繧ｫ繝ｼ繝峨・繧ｵ繝繝阪う繝ｫ繧呈峩譁ｰ
+      // ギャラリーカードのサムネイルを更新
       const card = document.querySelector('[data-id="' + id + '"]');
       if (card) {
         const img = card.querySelector('img.card-video-thumb');
@@ -1057,7 +1057,7 @@ videoCtxMenu.addEventListener('click', async function(e) {
       }
       const file = state.files.find(function(f) { return f.id === id; });
       if (file) file.hasThumbnail = true;
-      showToast('繧ｵ繝繝阪う繝ｫ繧呈峩譁ｰ縺励∪縺励◆');
+      showToast('サムネイルを更新しました');
     }
   }
 });
@@ -1130,7 +1130,7 @@ document.getElementById('dl-modal').addEventListener('click', function(e) {
   if (e.target === e.currentTarget || e.target.classList.contains('modal-backdrop')) closeDownload();
 });
 
-// URL繝壹・繧ｹ繝医〒蜊ｳ繧ｹ繧ｿ繝ｼ繝・
+// URLペーストで即スタート
 document.getElementById('dl-url-input').addEventListener('paste', function() {
   setTimeout(function() {
     const val = document.getElementById('dl-url-input').value.trim();
@@ -1173,7 +1173,7 @@ function addJobCard(jobId, url) {
       '<div class="dl-job-url">' + url + '</div>' +
       '<div class="dl-job-status downloading" id="dl-status-' + jobId + '">Downloading</div>' +
     '</div>' +
-    '<div class="dl-job-filename" id="dl-filename-' + jobId + '">貅門ｙ荳ｭ...</div>' +
+    '<div class="dl-job-filename" id="dl-filename-' + jobId + '">準備中...</div>' +
     '<div class="dl-progress-bar"><div class="dl-progress-fill" id="dl-prog-' + jobId + '" style="width:0%"></div></div>' +
     '<div class="dl-job-actions">' +
       '<button class="dl-cancel-btn" id="dl-cancel-' + jobId + '">Cancel</button>' +
@@ -1200,7 +1200,7 @@ async function pollJob(jobId) {
 
     if (data.status === 'done') {
       clearInterval(timer);
-      if (statusEl) { statusEl.textContent = '笨・Done'; statusEl.className = 'dl-job-status done'; }
+      if (statusEl) { statusEl.textContent = '✓ Done'; statusEl.className = 'dl-job-status done'; }
       if (progEl) progEl.style.width = '100%';
       showToast('\u30C0\u30A6\u30F3\u30ED\u30FC\u30C9\u5B8C\u4E86: ' + (data.filename || ''));
       setTimeout(function() { loadFiles(); }, 1000);
@@ -1231,7 +1231,7 @@ async function cancelJob(jobId) {
 async function openSettings() {
   const modal = document.getElementById('settings-modal');
   modal.classList.remove('hidden');
-  // 迴ｾ蝨ｨ縺ｮ險ｭ螳壹ｒ蜿門ｾ・
+  // 現在の設定を取得
   try {
     const s = await api('GET', '/settings');
     document.getElementById('settings-library-path').value = s.libraryPath || '';
@@ -1254,20 +1254,20 @@ document.getElementById('settings-modal').addEventListener('click', function(e) 
 document.getElementById('settings-path-apply').addEventListener('click', async function() {
   const newPath = document.getElementById('settings-library-path').value.trim();
   const status = document.getElementById('settings-path-status');
-  if (!newPath) { status.textContent = '繝代せ繧貞・蜉帙＠縺ｦ縺上□縺輔＞'; status.className = 'err'; return; }
-  status.textContent = '遒ｺ隱堺ｸｭ...'; status.className = '';
+  if (!newPath) { status.textContent = 'パスを入力してください'; status.className = 'err'; return; }
+  status.textContent = '確認中...'; status.className = '';
   try {
     const r = await api('PUT', '/settings', { libraryPath: newPath });
     document.getElementById('settings-current-path').textContent = r.libraryPath;
-    status.textContent = '笨・驕ｩ逕ｨ縺励∪縺励◆縲ゅΛ繧､繝悶Λ繝ｪ繧偵Μ繝ｭ繝ｼ繝峨＠縺ｾ縺・..';
+    status.textContent = '✓ 適用しました。ライブラリをリロードします...';
     status.className = 'ok';
     setTimeout(async () => {
       closeSettings();
       await loadFiles();
     }, 800);
   } catch (e) {
-    const msg = e.message || '繧ｨ繝ｩ繝ｼ縺檎匱逕溘＠縺ｾ縺励◆';
-    status.textContent = '笨・' + msg;
+    const msg = e.message || 'エラーが発生しました';
+    status.textContent = '✓ ' + msg;
     status.className = 'err';
   }
 });
@@ -1332,7 +1332,7 @@ document.getElementById('new-collection-btn').addEventListener('click', function
   input.addEventListener('blur', confirm_create);
 });
 
-// 繧ｳ繝ｬ繧ｯ繧ｷ繝ｧ繝ｳ縺九ｉ蜑企勁・・nspector 縺ｮ Remove 繝懊ち繝ｳ逕ｨ・・
+// コレクションから削除（Inspector の Remove ボタン用）
 async function removeFromCollection(fileId) {
   const col = state.collections.find(c => c.id === state.activeCollection);
   if (!col) return;
@@ -1547,10 +1547,10 @@ if (_mEdBtn) _mEdBtn.addEventListener('click', function() {
 
 // ===== KEYBOARD SHORTCUTS =====
 document.addEventListener('keydown', function(e) {
-  // input/textarea 縺ｫ繝輔か繝ｼ繧ｫ繧ｹ荳ｭ縺ｯ辟｡隕・
+  // input/textarea にフォーカス中は無視
   const tag = document.activeElement.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-  // 繝｢繝ｼ繝繝ｫ縺碁幕縺・※縺・ｋ縺ｨ縺阪・遏｢蜊ｰ邉ｻ縺縺第椛蛻ｶ
+  // モーダルが開いているときは矢印系だけ抑制
   const modalOpen = !document.getElementById('video-modal').classList.contains('hidden');
 
   switch (e.key) {
