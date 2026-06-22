@@ -68,22 +68,29 @@ function moveIfExists(src, dest) {
 }
 function migrateIfNeeded() {
   if (settings.libraries) return;
-  const oldLibraryPath = settings.libraryPath || process.env.EAGLE_LIBRARY || 'D:\\claude\\eaglemodoki';
-  const newDir = path.join(oldLibraryPath, '.videoref');
-  fs.mkdirSync(newDir, { recursive: true });
-  moveIfExists(path.join(DATA_BASE, 'metadata.json'), path.join(newDir, 'metadata.json'));
-  moveIfExists(path.join(DATA_BASE, 'trash.json'), path.join(newDir, 'trash.json'));
-  moveIfExists(path.join(DATA_BASE, 'trash'), path.join(newDir, 'trash'));
-  moveIfExists(path.join(DATA_BASE, 'thumbs'), path.join(newDir, 'thumbs'));
-  fs.writeFileSync(path.join(newDir, 'collections.json'), JSON.stringify(settings.collections || [], null, 2), 'utf-8');
+  try {
+    const oldLibraryPath = settings.libraryPath || process.env.EAGLE_LIBRARY || 'D:\\claude\\eaglemodoki';
+    const newDir = path.join(oldLibraryPath, '.videoref');
+    fs.mkdirSync(newDir, { recursive: true });
+    moveIfExists(path.join(DATA_BASE, 'metadata.json'), path.join(newDir, 'metadata.json'));
+    moveIfExists(path.join(DATA_BASE, 'trash.json'), path.join(newDir, 'trash.json'));
+    moveIfExists(path.join(DATA_BASE, 'trash'), path.join(newDir, 'trash'));
+    moveIfExists(path.join(DATA_BASE, 'thumbs'), path.join(newDir, 'thumbs'));
+    fs.writeFileSync(path.join(newDir, 'collections.json'), JSON.stringify(settings.collections || [], null, 2), 'utf-8');
 
-  const id = genLibId();
-  settings.libraries = [{ id, name: 'Library', path: oldLibraryPath }];
-  settings.activeLibraryId = id;
-  delete settings.libraryPath;
-  delete settings.collections;
-  saveSettings(settings);
-  console.log(`   移行完了: ライブラリデータを ${newDir} に移動しました`);
+    const id = genLibId();
+    settings.libraries = [{ id, name: 'Library', path: oldLibraryPath }];
+    settings.activeLibraryId = id;
+    delete settings.libraryPath;
+    delete settings.collections;
+    saveSettings(settings);
+    console.log(`   移行完了: ライブラリデータを ${newDir} に移動しました`);
+  } catch (e) {
+    // 移行に失敗してもサーバー起動を止めない。settings.librariesが未設定のまま
+    // 残るため、次回起動時にも移行が再試行される（moveIfExistsは既に移動済みの
+    // ファイルがあれば existsSync チェックで素通りするため再実行は安全）。
+    console.error('[migrate] migration failed, server will start without multi-library data:', e.message);
+  }
 }
 migrateIfNeeded();
 
@@ -674,11 +681,16 @@ app.post('/api/download', (req, res) => {
   const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const ytdlp = getYtDlpPath();
 
+  // ダウンロード開始時点のライブラリをスナップショット（完了時にライブラリが
+  // 切り替わっていても、保存先と無関係なライブラリのmetadata.jsonを汚さないため）
+  const jobLibraryPath = LIBRARY_PATH;
+  const jobDataPath = DATA_PATH;
+
   // 安全なテンプレ: IDベースで保存 → パストラバーサル防止 (#3)
   // --print after_move で完了後の実ファイルパスを取得 (#11)
   const args = [
     url,
-    '--output', path.join(LIBRARY_PATH, '%(id)s.%(ext)s'),
+    '--output', path.join(jobLibraryPath, '%(id)s.%(ext)s'),
     '--format', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
     '--merge-output-format', 'mp4',
     '--no-playlist',
@@ -701,7 +713,7 @@ app.post('/api/download', (req, res) => {
     const lines = data.toString().split('\n').filter(Boolean);
     lines.forEach(line => {
       // --print after_move の出力は絶対パス（他の出力と区別）
-      if (line.startsWith(LIBRARY_PATH) && fs.existsSync(line.trim())) {
+      if (line.startsWith(jobLibraryPath) && fs.existsSync(line.trim())) {
         downloadedFilePath = line.trim();
         job.filename = path.basename(downloadedFilePath);
         return;
@@ -722,21 +734,39 @@ app.post('/api/download', (req, res) => {
     job.status = code === 0 ? 'done' : 'error';
     job.progress = code === 0 ? 100 : job.progress;
     if (code === 0) {
-      // --print after_move で特定した実ファイルパスを使用 (#11)
+      // 完了処理は常にダウンロード開始時のライブラリ(jobLibraryPath/jobDataPath)を
+      // 対象にする。途中でライブラリが切り替わっていても、現在アクティブな
+      // 別ライブラリのmetadata.jsonに書き込んでしまわないようにするため。
       const targetPath = downloadedFilePath;
-      if (targetPath && isSafePath(targetPath) && fs.existsSync(targetPath)) {
-        const fileId = generateId(targetPath);
-        const meta = loadMeta();
+      const normalizedTarget = targetPath && path.normalize(targetPath);
+      const normalizedBase = path.normalize(jobLibraryPath);
+      const isSafe = normalizedTarget && (normalizedTarget.startsWith(normalizedBase + path.sep) || normalizedTarget === normalizedBase);
+      if (targetPath && isSafe && fs.existsSync(targetPath)) {
+        const rel = path.relative(jobLibraryPath, targetPath).replace(/\\/g, '/');
+        const fileId = Buffer.from(rel).toString('base64url');
+        let meta = {};
+        try {
+          if (fs.existsSync(jobDataPath)) meta = JSON.parse(fs.readFileSync(jobDataPath, 'utf-8'));
+        } catch (e) {}
         meta[fileId] = { ...(meta[fileId] || {}), url: job.url };
-        saveMeta(meta);
+        const tmp = jobDataPath + '.tmp';
+        try {
+          fs.writeFileSync(tmp, JSON.stringify(meta, null, 2), 'utf-8');
+          fs.renameSync(tmp, jobDataPath);
+        } catch (e) {
+          console.error('[download] failed to save metadata:', e.message);
+          try { fs.unlinkSync(tmp); } catch (_) {}
+        }
         job.savedIds = [fileId];
         console.log(`  URL saved: ${path.basename(targetPath)} → ${job.url}`);
-        // サムネイル生成
-        const relPath = path.relative(LIBRARY_PATH, targetPath).replace(/\\/g, '/');
-        startBackgroundThumbGen([{ id: fileId, name: path.basename(targetPath), relPath, type: 'video' }]);
-      } else {
-        // fallback: 差分検出
-        const allFiles = await scanDir(LIBRARY_PATH, LIBRARY_PATH);
+        // サムネイル生成（ダウンロード中にライブラリが切り替わっていた場合は
+        // スキップ。そのライブラリを再度開いた際に /api/thumb で遅延生成される）
+        if (jobLibraryPath === LIBRARY_PATH) {
+          startBackgroundThumbGen([{ id: fileId, name: path.basename(targetPath), relPath: rel, type: 'video' }]);
+        }
+      } else if (jobLibraryPath === LIBRARY_PATH) {
+        // fallback: 差分検出（ライブラリが切り替わっている場合は対象外なので行わない）
+        const allFiles = await scanDir(jobLibraryPath, jobLibraryPath);
         const filesAfter = allFiles.filter(f => f.type === 'video');
         startBackgroundThumbGen(filesAfter);
       }
@@ -845,7 +875,12 @@ function switchLibrary(id) {
     }
   } catch (e) {}
   generating.clear();
-  thumbQueue.length = 0;
+  // キュー中の各リクエストのPromiseを解決してから空にする
+  // （解決せずに空にすると、待機中の/api/thumbリクエストが永久にハングする）
+  while (thumbQueue.length > 0) {
+    const { resolve } = thumbQueue.shift();
+    resolve(false);
+  }
   settings.activeLibraryId = id;
   saveSettings(settings);
   return true;

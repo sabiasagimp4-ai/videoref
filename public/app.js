@@ -867,6 +867,25 @@ async function loadTrashView() {
 }
 
 // ===== LIBRARY SWITCHER =====
+// ライブラリ切替・追加・削除の直後に呼ぶ。旧ライブラリの選択状態やフィルタが
+// 残ると、新ライブラリに存在しないファイル/フォルダ/タグを参照してギャラリーが
+// 空に見えたり、ゴミ箱表示のまま画面が同期しなくなる
+function resetLibrarySwitchState() {
+  state.selected = null;
+  state.selectedIds.clear();
+  state.activeFolder = null;
+  state.activeTag = null;
+  state.activeCollection = null;
+  state.activeNav = 'all';
+  closeInspector();
+  document.querySelectorAll('.nav-item').forEach(function(i) { i.classList.remove('active'); });
+  const allNav = document.querySelector('.nav-item[data-view="all"]');
+  if (allNav) allNav.classList.add('active');
+  document.querySelectorAll('.folder-item').forEach(function(f) { f.classList.remove('active'); });
+  document.querySelectorAll('.tag-pill-nav').forEach(function(t) { t.classList.remove('active'); });
+  document.getElementById('breadcrumb').textContent = 'Library';
+}
+
 async function loadLibraries() {
   const data = await api('GET', '/libraries');
   state.libraries = data.libraries;
@@ -888,9 +907,11 @@ function renderLibSwitcherDropdown() {
         e.stopPropagation();
         if (!confirm('"' + lib.name + '" をライブラリ一覧から削除しますか？(ファイルは削除されません)')) return;
         try {
+          const wasActive = lib.id === state.activeLibraryId;
           await api('DELETE', '/libraries/' + lib.id);
           await loadLibraries();
           renderLibSwitcherDropdown();
+          if (wasActive) resetLibrarySwitchState();
           await loadFiles();
           showToast(lib.name + ' を一覧から削除しました');
         } catch (err) { showToast('エラー: ' + err.message); }
@@ -900,6 +921,7 @@ function renderLibSwitcherDropdown() {
         await api('POST', '/libraries/' + lib.id + '/activate');
         await loadLibraries();
         hideLibSwitcherDropdown();
+        resetLibrarySwitchState();
         await loadFiles();
         showToast(lib.name + ' に切り替えました');
       } else {
@@ -923,6 +945,7 @@ function renderLibSwitcherDropdown() {
       await api('POST', '/libraries', { name, path: folder });
       await loadLibraries();
       hideLibSwitcherDropdown();
+      resetLibrarySwitchState();
       await loadFiles();
       showToast(name + ' を追加しました');
     } catch (err) { showToast('エラー: ' + err.message); }
