@@ -1319,13 +1319,10 @@ async function cancelJob(jobId) {
 async function openSettings() {
   const modal = document.getElementById('settings-modal');
   modal.classList.remove('hidden');
-  // 現在の設定を取得
   try {
     const s = await api('GET', '/settings');
-    document.getElementById('settings-library-path').value = s.libraryPath || '';
     document.getElementById('settings-current-path').textContent = s.libraryPath || '?';
     document.getElementById('settings-thumb-dir').textContent = s.thumbDir || '?';
-    document.getElementById('settings-path-status').textContent = '';
   } catch (e) {}
 }
 
@@ -1337,27 +1334,6 @@ document.getElementById('settings-btn').addEventListener('click', openSettings);
 document.getElementById('settings-close').addEventListener('click', closeSettings);
 document.getElementById('settings-modal').addEventListener('click', function(e) {
   if (e.target === e.currentTarget || e.target.classList.contains('modal-backdrop')) closeSettings();
-});
-
-document.getElementById('settings-path-apply').addEventListener('click', async function() {
-  const newPath = document.getElementById('settings-library-path').value.trim();
-  const status = document.getElementById('settings-path-status');
-  if (!newPath) { status.textContent = 'パスを入力してください'; status.className = 'err'; return; }
-  status.textContent = '確認中...'; status.className = '';
-  try {
-    const r = await api('PUT', '/settings', { libraryPath: newPath });
-    document.getElementById('settings-current-path').textContent = r.libraryPath;
-    status.textContent = '✓ 適用しました。ライブラリをリロードします...';
-    status.className = 'ok';
-    setTimeout(async () => {
-      closeSettings();
-      await loadFiles();
-    }, 800);
-  } catch (e) {
-    const msg = e.message || 'エラーが発生しました';
-    status.textContent = '✓ ' + msg;
-    status.className = 'err';
-  }
 });
 
 // ===== COLLECTIONS =====
