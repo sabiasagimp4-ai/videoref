@@ -804,6 +804,86 @@ app.delete('/api/download/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ===== IMPORT（ドラッグ&ドロップ取り込み） =====
+const importJobs = new Map(); // id -> { status, total, done, errors, importedIds }
+const IMPORT_EXTS = [...VIDEO_EXTS, ...IMAGE_EXTS, ...AUDIO_EXTS];
+
+// POST /api/import — D&Dで受け取ったローカルファイルをライブラリへコピー/移動
+app.post('/api/import', (req, res) => {
+  const { paths, mode } = req.body;
+  if (!Array.isArray(paths) || paths.length === 0) return res.status(400).json({ error: 'paths required' });
+  if (mode !== 'copy' && mode !== 'move') return res.status(400).json({ error: 'mode must be copy or move' });
+
+  // インポート開始時点のライブラリをスナップショット（途中でライブラリが
+  // 切り替わっても、現在アクティブな別ライブラリへ取り込んでしまわないため）
+  const jobLibraryPath = LIBRARY_PATH;
+
+  const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const job = { status: 'running', total: paths.length, done: 0, errors: [], importedIds: [] };
+  importJobs.set(jobId, job);
+  res.json({ jobId });
+
+  (async () => {
+    for (const srcPath of paths) {
+      try {
+        const ext = path.extname(srcPath).toLowerCase();
+        if (!IMPORT_EXTS.includes(ext)) {
+          job.errors.push(path.basename(srcPath) + ': 対応していない形式です');
+          job.done++;
+          continue;
+        }
+        if (!fs.existsSync(srcPath)) {
+          job.errors.push(path.basename(srcPath) + ': ファイルが見つかりません');
+          job.done++;
+          continue;
+        }
+        const baseName = path.basename(srcPath, ext);
+        let destName = baseName + ext;
+        let destPath = path.join(jobLibraryPath, destName);
+        let n = 1;
+        while (fs.existsSync(destPath)) {
+          destName = `${baseName} (${n})${ext}`;
+          destPath = path.join(jobLibraryPath, destName);
+          n++;
+        }
+        if (mode === 'move') {
+          try {
+            fs.renameSync(srcPath, destPath);
+          } catch (e) {
+            if (e.code === 'EXDEV') {
+              fs.copyFileSync(srcPath, destPath);
+              fs.unlinkSync(srcPath);
+            } else {
+              throw e;
+            }
+          }
+        } else {
+          fs.copyFileSync(srcPath, destPath);
+        }
+        const rel = path.relative(jobLibraryPath, destPath).replace(/\\/g, '/');
+        job.importedIds.push(Buffer.from(rel).toString('base64url'));
+      } catch (e) {
+        job.errors.push(path.basename(srcPath) + ': ' + e.message);
+      }
+      job.done++;
+    }
+    job.status = 'done';
+    // インポート中にライブラリが切り替わっていた場合、サムネ生成は対象外
+    // （そのライブラリを開いた際に /api/thumb で遅延生成される）
+    if (jobLibraryPath === LIBRARY_PATH) {
+      const allFiles = await scanDir(jobLibraryPath, jobLibraryPath);
+      startBackgroundThumbGen(allFiles.filter(f => f.type === 'video'));
+    }
+  })();
+});
+
+// GET /api/import/:id — 取り込み進行状況
+app.get('/api/import/:id', (req, res) => {
+  const job = importJobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'job not found' });
+  res.json(job);
+});
+
 function loadCollections() {
   try {
     if (fs.existsSync(COLLECTIONS_PATH)) return JSON.parse(fs.readFileSync(COLLECTIONS_PATH, 'utf-8'));

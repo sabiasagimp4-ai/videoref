@@ -326,6 +326,15 @@ kbd {
 .empty-icon { font-size: 48px; margin-bottom: 12px; }
 .empty-title { font-size: 16px; font-weight: 500; margin-bottom: 6px; color: var(--text-2); }
 .empty-sub { font-size: 12px; }
+
+#drop-overlay {
+  position: absolute; inset: 8px; z-index: 50;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; background: var(--accent-dim); border: 2px dashed var(--accent);
+  border-radius: var(--radius-sm); color: var(--text-1); font-size: 14px;
+  pointer-events: none;
+}
+.drop-overlay-icon { font-size: 40px; }
 .spinner {
   width: 28px; height: 28px; border: 2px solid var(--bg-4);
   border-top-color: var(--accent); border-radius: 50%;

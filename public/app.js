@@ -1000,6 +1000,97 @@ document.getElementById('lib-switcher-btn').addEventListener('click', function(e
   }
 });
 
+// ===== DRAG & DROP IMPORT =====
+let dragCounter = 0;
+let pendingImportPaths = null;
+
+document.addEventListener('dragenter', function(e) {
+  e.preventDefault();
+  dragCounter++;
+  document.getElementById('drop-overlay').classList.remove('hidden');
+});
+document.addEventListener('dragover', function(e) { e.preventDefault(); });
+document.addEventListener('dragleave', function(e) {
+  e.preventDefault();
+  dragCounter--;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    document.getElementById('drop-overlay').classList.add('hidden');
+  }
+});
+document.addEventListener('drop', function(e) {
+  e.preventDefault();
+  dragCounter = 0;
+  document.getElementById('drop-overlay').classList.add('hidden');
+  const files = Array.from(e.dataTransfer.files || []);
+  if (files.length === 0) return;
+  if (!window.electronAPI || !window.electronAPI.getPathForFile) {
+    showToast('ドラッグ&ドロップ取り込みはElectron環境でのみ使用できます');
+    return;
+  }
+  const paths = files.map(function(f) { return window.electronAPI.getPathForFile(f); }).filter(Boolean);
+  if (paths.length === 0) return;
+  openImportModeModal(paths);
+});
+
+function openImportModeModal(paths) {
+  pendingImportPaths = paths;
+  document.getElementById('import-mode-summary').textContent = paths.length + ' 件のファイルを追加します';
+  document.getElementById('import-progress').classList.add('hidden');
+  document.getElementById('import-mode-copy').disabled = false;
+  document.getElementById('import-mode-move').disabled = false;
+  document.getElementById('import-mode-modal').classList.remove('hidden');
+}
+function closeImportModeModal() {
+  document.getElementById('import-mode-modal').classList.add('hidden');
+  pendingImportPaths = null;
+}
+document.getElementById('import-mode-cancel').addEventListener('click', closeImportModeModal);
+document.getElementById('import-mode-modal').addEventListener('click', function(e) {
+  if (e.target === e.currentTarget || e.target.classList.contains('modal-backdrop')) closeImportModeModal();
+});
+document.getElementById('import-mode-copy').addEventListener('click', function() { startImport('copy'); });
+document.getElementById('import-mode-move').addEventListener('click', function() { startImport('move'); });
+
+async function startImport(mode) {
+  if (!pendingImportPaths) return;
+  const paths = pendingImportPaths;
+  document.getElementById('import-mode-copy').disabled = true;
+  document.getElementById('import-mode-move').disabled = true;
+  document.getElementById('import-progress').classList.remove('hidden');
+  document.getElementById('import-progress-text').textContent = '取り込み中... 0/' + paths.length;
+  try {
+    const { jobId } = await api('POST', '/import', { paths, mode });
+    await pollImportJob(jobId, paths.length);
+  } catch (err) {
+    showToast('エラー: ' + err.message);
+  }
+  closeImportModeModal();
+}
+
+function pollImportJob(jobId, total) {
+  return new Promise(function(resolve) {
+    const timer = setInterval(async function() {
+      try {
+        const job = await api('GET', '/import/' + jobId);
+        document.getElementById('import-progress-text').textContent = '取り込み中... ' + job.done + '/' + total;
+        if (job.status === 'done') {
+          clearInterval(timer);
+          if (job.errors && job.errors.length > 0) {
+            showToast(job.errors.length + ' 件のエラー: ' + job.errors[0]);
+          }
+          showToast((job.importedIds || []).length + ' 件のファイルを追加しました');
+          await loadFiles();
+          resolve();
+        }
+      } catch (e) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, 500);
+  });
+}
+
 // ===== CONTROLS & INIT (DOM ready) =====
 // ===== PERSISTENT UI STATE =====
 function saveUIState() {

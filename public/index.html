@@ -128,6 +128,10 @@
           <div class="spinner"></div>
           <div>Loading library...</div>
         </div>
+        <div id="drop-overlay" class="hidden">
+          <div class="drop-overlay-icon">📥</div>
+          <div>ここにドロップしてライブラリへ追加</div>
+        </div>
       </div>
 
       <div id="statusbar">
@@ -384,6 +388,31 @@
           </div>
           <div class="settings-row">
             <button id="sf-save" class="settings-btn-primary">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== IMPORT MODE MODAL ===== -->
+  <div id="import-mode-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content settings-modal-content">
+      <div class="modal-header">
+        <span id="import-mode-title">ファイルを追加</span>
+      </div>
+      <div id="import-mode-body" class="settings-section">
+        <div class="settings-row">
+          <div class="settings-label" id="import-mode-summary"></div>
+        </div>
+        <div class="settings-row" style="display:flex; gap:8px;">
+          <button id="import-mode-copy" class="settings-btn-primary">コピーして追加</button>
+          <button id="import-mode-move" class="settings-btn-primary">移動して追加</button>
+          <button id="import-mode-cancel" class="secondary-btn" style="width:auto;">キャンセル</button>
+        </div>
+        <div class="settings-row">
+          <div id="import-progress" class="hidden">
+            <div class="settings-label" id="import-progress-text"></div>
           </div>
         </div>
       </div>
