@@ -891,6 +891,128 @@ async function loadTrashView() {
   gallery.appendChild(frag);
 }
 
+// ===== DUPLICATE DETECTION（完全一致のみ） =====
+async function loadDuplicatesView() {
+  const gallery = document.getElementById('gallery');
+  const empty = document.getElementById('empty-state');
+  const loading = document.getElementById('loading-state');
+  gallery.innerHTML = '';
+  empty.classList.add('hidden');
+  loading.classList.add('hidden');
+
+  const actionRow = document.createElement('div');
+  actionRow.style.cssText = 'padding:10px 16px;display:flex;align-items:center;gap:10px;';
+  const scanBtn = document.createElement('button');
+  scanBtn.className = 'secondary-btn';
+  scanBtn.style.width = 'auto';
+  scanBtn.textContent = '重複をスキャン';
+  const statusText = document.createElement('span');
+  statusText.style.cssText = 'font-size:12px;color:var(--text-3);';
+  actionRow.appendChild(scanBtn);
+  actionRow.appendChild(statusText);
+  gallery.appendChild(actionRow);
+
+  const resultsWrap = document.createElement('div');
+  resultsWrap.id = 'duplicates-results';
+  resultsWrap.style.cssText = 'padding:0 16px 16px;';
+  gallery.appendChild(resultsWrap);
+
+  async function pollScan() {
+    const job = await api('GET', '/duplicates/scan');
+    if (job.status === 'running') {
+      statusText.textContent = 'スキャン中... ' + job.done + '/' + job.total;
+      setTimeout(pollScan, 600);
+    } else if (job.status === 'error') {
+      statusText.textContent = 'スキャンに失敗しました';
+    } else {
+      statusText.textContent = '';
+      await renderDuplicateGroups();
+    }
+  }
+
+  scanBtn.addEventListener('click', async function() {
+    statusText.textContent = 'スキャン中...';
+    resultsWrap.innerHTML = '';
+    try {
+      await api('POST', '/duplicates/scan');
+      pollScan();
+    } catch (e) { statusText.textContent = 'エラー: ' + e.message; }
+  });
+
+  async function renderDuplicateGroups() {
+    let groups;
+    try {
+      groups = await api('GET', '/duplicates');
+    } catch (e) {
+      resultsWrap.textContent = '結果の取得に失敗しました';
+      return;
+    }
+    resultsWrap.innerHTML = '';
+    if (groups.length === 0) {
+      resultsWrap.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:20px 0;">重複ファイルは見つかりませんでした（「重複をスキャン」を押してください）</div>';
+      document.getElementById('status-count').textContent = '0 groups';
+      return;
+    }
+    document.getElementById('status-count').textContent = groups.length + ' groups';
+    groups.forEach(function(group, gi) {
+      const groupEl = document.createElement('div');
+      groupEl.style.cssText = 'border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:10px;';
+      const header = document.createElement('div');
+      header.style.cssText = 'font-size:12px;color:var(--text-3);margin-bottom:8px;';
+      header.textContent = formatSize(group.size) + ' × ' + group.files.length + ' 件（完全一致）';
+      groupEl.appendChild(header);
+
+      group.files.forEach(function(f, fi) {
+        const row = document.createElement('label');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;cursor:pointer;';
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'dup-keep-' + gi;
+        radio.value = f.id;
+        radio.checked = fi === 0;
+        row.appendChild(radio);
+        const label = document.createElement('span');
+        label.textContent = f.name + (f.tags.length ? '  [' + f.tags.join(', ') + ']' : '') + (f.rating ? '  ★' + f.rating : '');
+        row.appendChild(label);
+        groupEl.appendChild(row);
+      });
+
+      const mergeBtn = document.createElement('button');
+      mergeBtn.className = 'secondary-btn';
+      mergeBtn.style.cssText = 'width:auto;margin-top:6px;color:var(--red);border-color:var(--red);';
+      mergeBtn.textContent = '残す1件以外をゴミ箱へ移動してマージ';
+      mergeBtn.addEventListener('click', async function() {
+        const checked = groupEl.querySelector('input[name="dup-keep-' + gi + '"]:checked');
+        if (!checked) return;
+        const keepId = checked.value;
+        const removeIds = group.files.map(function(f) { return f.id; }).filter(function(id) { return id !== keepId; });
+        if (!confirm(removeIds.length + ' 件をゴミ箱へ移動します。タグ・評価は残すファイルに統合されます。よろしいですか？')) return;
+        try {
+          await api('POST', '/duplicates/merge', { keepId, removeIds });
+          showToast('マージしました');
+          await loadFiles();
+          state.activeNav = 'duplicates';
+          document.getElementById('breadcrumb').textContent = '重複ファイル';
+          await renderDuplicateGroups();
+        } catch (e) { showToast('エラー: ' + e.message); }
+      });
+      groupEl.appendChild(mergeBtn);
+      resultsWrap.appendChild(groupEl);
+    });
+  }
+
+  // 既存のスキャン結果があれば即表示。実行中なら進行状況をポーリング
+  try {
+    const job = await api('GET', '/duplicates/scan');
+    if (job.status === 'running') {
+      statusText.textContent = 'スキャン中... ' + job.done + '/' + job.total;
+      pollScan();
+    } else {
+      await renderDuplicateGroups();
+    }
+  } catch (e) { await renderDuplicateGroups(); }
+}
+
 // ===== LIBRARY SWITCHER =====
 // ライブラリ切替・追加・削除の直後に呼ぶ。旧ライブラリの選択状態やフィルタが
 // 残ると、新ライブラリに存在しないファイル/フォルダ/タグを参照してギャラリーが
@@ -1186,6 +1308,9 @@ document.querySelectorAll('.nav-item').forEach(function(item) {
     if (navKey === 'trash') {
       document.getElementById('breadcrumb').textContent = 'ゴミ箱';
       loadTrashView();
+    } else if (navKey === 'duplicates') {
+      document.getElementById('breadcrumb').textContent = '重複ファイル';
+      loadDuplicatesView();
     } else {
       const labels = { all: 'Library', untagged: 'Untagged', recent: 'Recently Added' };
       document.getElementById('breadcrumb').textContent = labels[navKey] || 'Library';

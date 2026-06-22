@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const mime = require('mime-types');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 
 const app = express();
@@ -884,6 +885,148 @@ app.get('/api/import/:id', (req, res) => {
   res.json(job);
 });
 
+// ===== 重複検出（Eagle同様: 完全一致のみ。サイズ→SHA-256で確定） =====
+let duplicateScanJob = null; // { status: 'running'|'done'|'error', total, done }
+let lastDuplicateGroups = []; // [{ hash, size, ids: [...] }]
+let lastDuplicateLibraryPath = null; // スキャン時点のライブラリ（切替後は無効化するため）
+
+function hashFile(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', (d) => hash.update(d));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+}
+
+// POST /api/duplicates/scan — スキャン開始（既に実行中なら新規開始しない）
+app.post('/api/duplicates/scan', (req, res) => {
+  if (duplicateScanJob && duplicateScanJob.status === 'running') {
+    return res.json({ ok: true, alreadyRunning: true });
+  }
+  const job = { status: 'running', total: 0, done: 0 };
+  duplicateScanJob = job;
+  res.json({ ok: true });
+
+  const scanLibraryPath = LIBRARY_PATH;
+  (async () => {
+    try {
+      const allFiles = await scanDir(scanLibraryPath, scanLibraryPath);
+      const bySize = new Map();
+      for (const f of allFiles) {
+        if (!bySize.has(f.size)) bySize.set(f.size, []);
+        bySize.get(f.size).push(f);
+      }
+      const candidates = [...bySize.values()].filter((g) => g.length > 1);
+      job.total = candidates.reduce((sum, g) => sum + g.length, 0);
+
+      const byHash = new Map();
+      for (const group of candidates) {
+        for (const f of group) {
+          try {
+            const fullPath = path.join(scanLibraryPath, f.relPath);
+            const hash = await hashFile(fullPath);
+            const key = f.size + '_' + hash;
+            if (!byHash.has(key)) byHash.set(key, { hash, size: f.size, ids: [] });
+            byHash.get(key).ids.push(f.id);
+          } catch (e) { console.error('[duplicates] hash error:', e.message); }
+          job.done++;
+        }
+      }
+      // スキャン中にライブラリが切り替わっていたら結果を捨てる
+      if (scanLibraryPath === LIBRARY_PATH) {
+        lastDuplicateGroups = [...byHash.values()].filter((g) => g.ids.length > 1);
+        lastDuplicateLibraryPath = scanLibraryPath;
+      }
+      job.status = 'done';
+    } catch (e) {
+      console.error('[duplicates] scan failed:', e.message);
+      job.status = 'error';
+    }
+  })();
+});
+
+// GET /api/duplicates/scan — 進行状況
+app.get('/api/duplicates/scan', (req, res) => {
+  res.json(duplicateScanJob || { status: 'idle', total: 0, done: 0 });
+});
+
+// GET /api/duplicates — 直近のスキャン結果（グループ化済み）
+app.get('/api/duplicates', (req, res) => {
+  if (lastDuplicateLibraryPath !== LIBRARY_PATH) return res.json([]);
+  const meta = loadMeta();
+  const groups = lastDuplicateGroups
+    .map((g) => ({
+      hash: g.hash,
+      size: g.size,
+      files: g.ids
+        .map((id) => {
+          const filePath = decodeId(id);
+          if (!filePath || !fs.existsSync(filePath)) return null;
+          return {
+            id,
+            name: path.basename(filePath),
+            relPath: path.relative(LIBRARY_PATH, filePath).replace(/\\/g, '/'),
+            tags: meta[id]?.tags || [],
+            rating: meta[id]?.rating || 0,
+          };
+        })
+        .filter(Boolean),
+    }))
+    .filter((g) => g.files.length > 1);
+  res.json(groups);
+});
+
+// POST /api/duplicates/merge — keepIdを残し、removeIdsをゴミ箱へ移動。メタデータはマージして保持
+app.post('/api/duplicates/merge', (req, res) => {
+  const { keepId, removeIds } = req.body;
+  if (!keepId || !Array.isArray(removeIds) || removeIds.length === 0) {
+    return res.status(400).json({ error: 'keepId and removeIds required' });
+  }
+  const meta = loadMeta();
+  const trash = loadTrash();
+  fs.mkdirSync(TRASH_DIR, { recursive: true });
+  const keepMeta = meta[keepId] || {};
+  const mergedTags = new Set(keepMeta.tags || []);
+  let mergedRating = keepMeta.rating || 0;
+  let mergedNote = keepMeta.note || '';
+  let mergedColor = keepMeta.color || null;
+  let mergedUrl = keepMeta.url || '';
+  let removed = 0;
+  for (const id of removeIds) {
+    if (id === keepId) continue;
+    const m = meta[id] || {};
+    (m.tags || []).forEach((t) => mergedTags.add(t));
+    if ((m.rating || 0) > mergedRating) mergedRating = m.rating;
+    if (!mergedNote && m.note) mergedNote = m.note;
+    if (!mergedColor && m.color) mergedColor = m.color;
+    if (!mergedUrl && m.url) mergedUrl = m.url;
+
+    const filePath = decodeId(id);
+    if (filePath && fs.existsSync(filePath)) {
+      const destName = id + '_' + path.basename(filePath);
+      try {
+        fs.renameSync(filePath, path.join(TRASH_DIR, destName));
+        trash.push({ id, name: path.basename(filePath), destName, deletedAt: new Date().toISOString() });
+        removed++;
+      } catch (e) { console.error('[duplicates merge] move failed:', e.message); }
+    }
+    const tp = thumbPath(id);
+    if (fs.existsSync(tp)) fs.unlinkSync(tp);
+    thumbCache.delete(id);
+    delete meta[id];
+  }
+  meta[keepId] = { ...keepMeta, tags: [...mergedTags], rating: mergedRating, note: mergedNote, color: mergedColor, url: mergedUrl };
+  saveMeta(meta);
+  saveTrash(trash);
+  // マージ済みグループをキャッシュから更新
+  lastDuplicateGroups = lastDuplicateGroups
+    .map((g) => ({ ...g, ids: g.ids.filter((id) => !removeIds.includes(id)) }))
+    .filter((g) => g.ids.length > 1);
+  res.json({ ok: true, removed });
+});
+
 function loadCollections() {
   try {
     if (fs.existsSync(COLLECTIONS_PATH)) return JSON.parse(fs.readFileSync(COLLECTIONS_PATH, 'utf-8'));
@@ -963,6 +1106,9 @@ function switchLibrary(id) {
     const { resolve } = thumbQueue.shift();
     resolve(false);
   }
+  // 重複検出結果は別ライブラリのIDを指してしまうため無効化する
+  lastDuplicateGroups = [];
+  lastDuplicateLibraryPath = null;
   settings.activeLibraryId = id;
   saveSettings(settings);
   return true;
