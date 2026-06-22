@@ -28,22 +28,42 @@ function genLibId() {
 }
 
 // 旧形式（settings.libraryPath 単一文字列）からの1回限りの移行
+// ドライブをまたぐ場合(EXDEV)は1件ずつコピーし、失敗したファイルがあっても
+// 全体を止めない。1件でも失敗があれば元データは削除せず残す（安全側）。
 function moveIfExists(src, dest) {
   if (!fs.existsSync(src)) return;
   try {
     fs.renameSync(src, dest);
+    return;
   } catch (e) {
-    if (e.code === 'EXDEV') {
-      if (fs.statSync(src).isDirectory()) {
-        fs.cpSync(src, dest, { recursive: true });
+    if (e.code !== 'EXDEV') {
+      console.error('[migrate] failed to move', src, '->', dest, ':', e.message);
+      return;
+    }
+  }
+  try {
+    if (fs.statSync(src).isDirectory()) {
+      fs.mkdirSync(dest, { recursive: true });
+      let failures = 0;
+      for (const entry of fs.readdirSync(src)) {
+        try {
+          fs.copyFileSync(path.join(src, entry), path.join(dest, entry));
+        } catch (e2) {
+          failures++;
+          console.error('[migrate] failed to copy', entry, ':', e2.message);
+        }
+      }
+      if (failures === 0) {
         fs.rmSync(src, { recursive: true, force: true });
       } else {
-        fs.copyFileSync(src, dest);
-        fs.unlinkSync(src);
+        console.error(`[migrate] ${failures} 件のコピーに失敗したため、元データ ${src} は削除せず残します`);
       }
     } else {
-      console.error('[migrate] failed to move', src, '->', dest, ':', e.message);
+      fs.copyFileSync(src, dest);
+      fs.unlinkSync(src);
     }
+  } catch (e3) {
+    console.error('[migrate] failed to migrate', src, '->', dest, ':', e3.message);
   }
 }
 function migrateIfNeeded() {
