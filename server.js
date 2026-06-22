@@ -805,7 +805,7 @@ app.delete('/api/collections/:id', (req, res) => {
 
 app.get('/api/ping', (_, res) => res.json({ ok: true, library: LIBRARY_PATH }));
 
-// GET /api/settings
+// GET /api/settings — 表示用（現在のライブラリ情報）
 app.get('/api/settings', (req, res) => {
   res.json({
     libraryPath: LIBRARY_PATH,
@@ -813,17 +813,80 @@ app.get('/api/settings', (req, res) => {
   });
 });
 
-// PUT /api/settings — ライブラリパス変更
-app.put('/api/settings', (req, res) => {
-  const { libraryPath } = req.body;
-  if (!libraryPath) return res.status(400).json({ error: 'libraryPath required' });
-  if (!fs.existsSync(libraryPath)) {
-    return res.status(400).json({ error: 'Path does not exist: ' + libraryPath });
-  }
-  LIBRARY_PATH = libraryPath;
-  settings.libraryPath = libraryPath;
+function switchLibrary(id) {
+  const lib = (settings.libraries || []).find(l => l.id === id);
+  if (!lib) return false;
+  LIBRARY_PATH = lib.path;
+  computeLibraryPaths(LIBRARY_PATH);
+  thumbCache.clear();
+  try {
+    for (const f of fs.readdirSync(THUMB_DIR)) {
+      if (f.endsWith('.jpg')) thumbCache.add(f.replace('.jpg', ''));
+    }
+  } catch (e) {}
+  generating.clear();
+  thumbQueue.length = 0;
+  settings.activeLibraryId = id;
   saveSettings(settings);
-  // サムネキャッシュはそのまま（別ライブラリのIDは自然と不一致になる）
+  return true;
+}
+
+// GET /api/libraries
+app.get('/api/libraries', (req, res) => {
+  res.json({
+    libraries: (settings.libraries || []).map(l => ({ id: l.id, name: l.name, path: l.path })),
+    activeLibraryId: settings.activeLibraryId,
+  });
+});
+
+// POST /api/libraries — 新規ライブラリ追加（追加後そのライブラリへ自動切替）
+app.post('/api/libraries', (req, res) => {
+  const { name, path: libPath } = req.body;
+  if (!name || !libPath) return res.status(400).json({ error: 'name and path required' });
+  if (!fs.existsSync(libPath) || !fs.statSync(libPath).isDirectory()) {
+    return res.status(400).json({ error: 'Path does not exist or is not a directory: ' + libPath });
+  }
+  const normalized = path.normalize(libPath);
+  if ((settings.libraries || []).some(l => path.normalize(l.path) === normalized)) {
+    return res.status(400).json({ error: 'This path is already registered as a library' });
+  }
+  const id = genLibId();
+  const lib = { id, name, path: libPath };
+  settings.libraries = [...(settings.libraries || []), lib];
+  saveSettings(settings);
+  switchLibrary(id);
+  res.json(lib);
+});
+
+// PUT /api/libraries/:id — 名前変更のみ
+app.put('/api/libraries/:id', (req, res) => {
+  const { name } = req.body;
+  const libs = settings.libraries || [];
+  const idx = libs.findIndex(l => l.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'not found' });
+  if (name) libs[idx] = { ...libs[idx], name };
+  settings.libraries = libs;
+  saveSettings(settings);
+  res.json(libs[idx]);
+});
+
+// DELETE /api/libraries/:id — リストから削除（ファイルは削除しない）
+app.delete('/api/libraries/:id', (req, res) => {
+  const libs = settings.libraries || [];
+  if (libs.length <= 1) return res.status(400).json({ error: 'Cannot delete the last library' });
+  const idx = libs.findIndex(l => l.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'not found' });
+  const wasActive = settings.activeLibraryId === req.params.id;
+  settings.libraries = libs.filter(l => l.id !== req.params.id);
+  saveSettings(settings);
+  if (wasActive) switchLibrary(settings.libraries[0].id);
+  res.json({ ok: true });
+});
+
+// POST /api/libraries/:id/activate — ライブラリ切替
+app.post('/api/libraries/:id/activate', (req, res) => {
+  const ok = switchLibrary(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'not found' });
   res.json({ ok: true, libraryPath: LIBRARY_PATH });
 });
 
