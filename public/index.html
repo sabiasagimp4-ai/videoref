@@ -12,10 +12,12 @@
     <!-- ===== SIDEBAR ===== -->
     <aside id="sidebar">
       <div id="sidebar-header">
-        <div id="app-logo">
+        <button id="lib-switcher-btn">
           <span class="logo-icon">🦅</span>
-          <span class="logo-text">videoref</span>
-        </div>
+          <span class="logo-text" id="lib-switcher-name">videoref</span>
+          <svg class="lib-switcher-caret" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div id="lib-switcher-dropdown" class="hidden"></div>
       </div>
 
       <nav id="sidebar-nav">

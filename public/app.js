@@ -17,6 +17,8 @@ const state = {
   thumbPollTimer: null,
   selectedIds: new Set(),
   lastClickedId: null,
+  libraries: [],
+  activeLibraryId: null,
 };
 
 const COLOR_MAP = {
@@ -864,6 +866,92 @@ async function loadTrashView() {
   gallery.appendChild(frag);
 }
 
+// ===== LIBRARY SWITCHER =====
+async function loadLibraries() {
+  const data = await api('GET', '/libraries');
+  state.libraries = data.libraries;
+  state.activeLibraryId = data.activeLibraryId;
+  const active = state.libraries.find(function(l) { return l.id === state.activeLibraryId; });
+  document.getElementById('lib-switcher-name').textContent = active ? active.name : 'videoref';
+}
+
+function renderLibSwitcherDropdown() {
+  const dd = document.getElementById('lib-switcher-dropdown');
+  dd.innerHTML = '';
+  state.libraries.forEach(function(lib) {
+    const item = document.createElement('div');
+    item.className = 'lib-switcher-item' + (lib.id === state.activeLibraryId ? ' active' : '');
+    item.innerHTML = '<span class="lib-name">' + lib.name + '</span>' +
+      (state.libraries.length > 1 ? '<span class="lib-remove" data-id="' + lib.id + '">✕</span>' : '');
+    item.addEventListener('click', async function(e) {
+      if (e.target.classList.contains('lib-remove')) {
+        e.stopPropagation();
+        if (!confirm('"' + lib.name + '" をライブラリ一覧から削除しますか？(ファイルは削除されません)')) return;
+        try {
+          await api('DELETE', '/libraries/' + lib.id);
+          await loadLibraries();
+          renderLibSwitcherDropdown();
+          await loadFiles();
+          showToast(lib.name + ' を一覧から削除しました');
+        } catch (err) { showToast('エラー: ' + err.message); }
+        return;
+      }
+      if (lib.id !== state.activeLibraryId) {
+        await api('POST', '/libraries/' + lib.id + '/activate');
+        await loadLibraries();
+        hideLibSwitcherDropdown();
+        await loadFiles();
+        showToast(lib.name + ' に切り替えました');
+      } else {
+        hideLibSwitcherDropdown();
+      }
+    });
+    dd.appendChild(item);
+  });
+  const addRow = document.createElement('div');
+  addRow.id = 'lib-switcher-add';
+  addRow.textContent = '+ ライブラリを追加';
+  addRow.addEventListener('click', async function(e) {
+    e.stopPropagation();
+    if (!window.electronAPI || !window.electronAPI.pickFolder) { showToast('フォルダ選択はElectron環境でのみ使用できます'); return; }
+    const folder = await window.electronAPI.pickFolder();
+    if (!folder) return;
+    const defaultName = folder.split(/[\\/]/).pop() || 'Library';
+    const name = prompt('ライブラリ名', defaultName);
+    if (!name) return;
+    try {
+      await api('POST', '/libraries', { name, path: folder });
+      await loadLibraries();
+      hideLibSwitcherDropdown();
+      await loadFiles();
+      showToast(name + ' を追加しました');
+    } catch (err) { showToast('エラー: ' + err.message); }
+  });
+  dd.appendChild(addRow);
+}
+
+function hideLibSwitcherDropdown() {
+  document.getElementById('lib-switcher-dropdown').classList.add('hidden');
+  document.removeEventListener('click', hideLibSwitcherDropdownOnOutsideClick);
+}
+function hideLibSwitcherDropdownOnOutsideClick(e) {
+  const dd = document.getElementById('lib-switcher-dropdown');
+  const btn = document.getElementById('lib-switcher-btn');
+  if (!dd.contains(e.target) && !btn.contains(e.target)) hideLibSwitcherDropdown();
+}
+
+document.getElementById('lib-switcher-btn').addEventListener('click', function(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('lib-switcher-dropdown');
+  if (dd.classList.contains('hidden')) {
+    renderLibSwitcherDropdown();
+    dd.classList.remove('hidden');
+    setTimeout(function() { document.addEventListener('click', hideLibSwitcherDropdownOnOutsideClick); }, 0);
+  } else {
+    hideLibSwitcherDropdown();
+  }
+});
+
 // ===== CONTROLS & INIT (DOM ready) =====
 // ===== PERSISTENT UI STATE =====
 function saveUIState() {
@@ -1707,7 +1795,7 @@ function showUpdateBanner(msg, showInstall) {
 }
 
 // ===== INIT =====
-  loadFiles();
+  loadLibraries().then(loadFiles);
 } // end initUI
 
 document.addEventListener('DOMContentLoaded', initUI);

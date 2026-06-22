@@ -50,8 +50,8 @@ body { font-family: -apple-system, "Segoe UI", sans-serif; font-size: 13px; colo
 #sidebar-header {
   padding: 14px 16px 12px;
   border-bottom: 1px solid var(--border);
+  position: relative;
 }
-#app-logo { display: flex; align-items: center; gap: 8px; }
 .logo-icon { font-size: 18px; }
 .logo-text { font-size: 14px; font-weight: 600; color: var(--text-1); letter-spacing: 0.01em; }
 
@@ -689,4 +689,34 @@ kbd {
   opacity: 0; transition: opacity 0.2s, transform 0.2s; pointer-events: none; z-index: 2000;
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* Library Switcher */
+#lib-switcher-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: none; color: var(--text-1);
+  font-size: 14px; font-weight: 600; cursor: pointer; padding: 4px;
+  border-radius: var(--radius-sm); text-align: left;
+}
+#lib-switcher-btn:hover { background: var(--bg-3); }
+#lib-switcher-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-switcher-caret { width: 12px; height: 12px; color: var(--text-3); flex-shrink: 0; }
+#lib-switcher-dropdown {
+  position: absolute; left: 12px; right: 12px; top: 100%; margin-top: 4px;
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 4px; z-index: 50; max-height: 300px; overflow-y: auto;
+}
+.lib-switcher-item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 13px; color: var(--text-2);
+}
+.lib-switcher-item:hover { background: var(--bg-3); color: var(--text-1); }
+.lib-switcher-item.active { color: var(--accent); }
+.lib-switcher-item .lib-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-switcher-item .lib-remove { color: var(--text-3); padding: 0 4px; }
+.lib-switcher-item .lib-remove:hover { color: var(--red); }
+#lib-switcher-add {
+  margin-top: 4px; padding: 7px 8px; border-top: 1px solid var(--border);
+  font-size: 13px; color: var(--accent); cursor: pointer; border-radius: var(--radius-sm);
+}
+#lib-switcher-add:hover { background: var(--bg-3); }
 
