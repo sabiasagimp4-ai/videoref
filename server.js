@@ -7,13 +7,8 @@ const { spawn } = require('child_process');
 const app = express();
 const PORT = parseInt(process.env.EAGLE_PORT || '3000', 10);
 const DATA_BASE = process.env.EAGLE_DATA || path.join(__dirname, '.data');
-const DATA_PATH = path.join(DATA_BASE, 'metadata.json');
-const THUMB_DIR = path.join(DATA_BASE, 'thumbs');
 const SETTINGS_PATH = path.join(DATA_BASE, 'settings.json');
-const TRASH_DIR  = path.join(DATA_BASE, 'trash');
-const TRASH_PATH = path.join(DATA_BASE, 'trash.json');
 
-// ライブラリパスは設定ファイル > 環境変数 > デフォルト の優先順
 function loadSettings() {
   try {
     if (fs.existsSync(SETTINGS_PATH)) return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
@@ -27,7 +22,56 @@ function saveSettings(data) {
   } catch (e) { console.error('[saveSettings] error:', e.message); }
 }
 let settings = loadSettings();
-let LIBRARY_PATH = settings.libraryPath || process.env.EAGLE_LIBRARY || 'D:\\claude\\eaglemodoki';
+
+function genLibId() {
+  return 'lib_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+// 旧形式（settings.libraryPath 単一文字列）からの1回限りの移行
+function moveIfExists(src, dest) {
+  if (!fs.existsSync(src)) return;
+  try {
+    fs.renameSync(src, dest);
+  } catch (e) {
+    if (e.code === 'EXDEV') {
+      if (fs.statSync(src).isDirectory()) {
+        fs.cpSync(src, dest, { recursive: true });
+        fs.rmSync(src, { recursive: true, force: true });
+      } else {
+        fs.copyFileSync(src, dest);
+        fs.unlinkSync(src);
+      }
+    } else {
+      console.error('[migrate] failed to move', src, '->', dest, ':', e.message);
+    }
+  }
+}
+function migrateIfNeeded() {
+  if (settings.libraries) return;
+  const oldLibraryPath = settings.libraryPath || process.env.EAGLE_LIBRARY || 'D:\\claude\\eaglemodoki';
+  const newDir = path.join(oldLibraryPath, '.videoref');
+  fs.mkdirSync(newDir, { recursive: true });
+  moveIfExists(path.join(DATA_BASE, 'metadata.json'), path.join(newDir, 'metadata.json'));
+  moveIfExists(path.join(DATA_BASE, 'trash.json'), path.join(newDir, 'trash.json'));
+  moveIfExists(path.join(DATA_BASE, 'trash'), path.join(newDir, 'trash'));
+  moveIfExists(path.join(DATA_BASE, 'thumbs'), path.join(newDir, 'thumbs'));
+  fs.writeFileSync(path.join(newDir, 'collections.json'), JSON.stringify(settings.collections || [], null, 2), 'utf-8');
+
+  const id = genLibId();
+  settings.libraries = [{ id, name: 'Library', path: oldLibraryPath }];
+  settings.activeLibraryId = id;
+  delete settings.libraryPath;
+  delete settings.collections;
+  saveSettings(settings);
+  console.log(`   移行完了: ライブラリデータを ${newDir} に移動しました`);
+}
+migrateIfNeeded();
+
+function getActiveLibrary() {
+  const libs = settings.libraries || [];
+  return libs.find(l => l.id === settings.activeLibraryId) || libs[0];
+}
+let LIBRARY_PATH = getActiveLibrary() ? getActiveLibrary().path : (process.env.EAGLE_LIBRARY || 'D:\\claude\\eaglemodoki');
 
 const VIDEO_EXTS = ['.mp4', '.mov', '.avi', '.webm', '.mkv', '.flv', '.wmv', '.m4v', '.ts', '.mts'];
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.tiff'];
@@ -42,8 +86,21 @@ const thumbQueue = [];
 let activeWorkers = 0;
 const MAX_WORKERS = 3;
 
+// ===== ライブラリ依存パスの計算 =====
+let DATA_PATH, THUMB_DIR, TRASH_DIR, TRASH_PATH, COLLECTIONS_PATH;
+function computeLibraryPaths(libPath) {
+  const dir = path.join(libPath, '.videoref');
+  DATA_PATH = path.join(dir, 'metadata.json');
+  THUMB_DIR = path.join(dir, 'thumbs');
+  TRASH_DIR = path.join(dir, 'trash');
+  TRASH_PATH = path.join(dir, 'trash.json');
+  COLLECTIONS_PATH = path.join(dir, 'collections.json');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(THUMB_DIR, { recursive: true });
+}
+
 // ===== INIT =====
-fs.mkdirSync(THUMB_DIR, { recursive: true });
+computeLibraryPaths(LIBRARY_PATH);
 
 // 既存サムネイルをキャッシュに読み込む
 try {
