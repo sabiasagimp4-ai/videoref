@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, Menu, ipcMain, dialog } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { fork, execSync } = require('child_process');
@@ -177,6 +177,12 @@ function setupAutoUpdater() {
 }
 
 ipcMain.on('install-update', () => autoUpdater.quitAndInstall());
+
+ipcMain.handle('pick-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
 
 // ===== PORT =====
 function getFreePort() {
