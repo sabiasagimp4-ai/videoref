@@ -36,7 +36,10 @@
         <section class="nav-section">
           <div class="nav-section-title">
             COLLECTIONS
-            <button id="new-collection-btn" title="New Collection">+</button>
+            <span class="nav-section-actions">
+              <button id="new-smart-folder-btn" title="New Smart Folder">🔍+</button>
+              <button id="new-collection-btn" title="New Collection">+</button>
+            </span>
           </div>
           <div id="collection-list"></div>
         </section>
@@ -309,6 +312,78 @@
           </div>
           <div class="settings-row">
             <div class="settings-label">ライブラリの追加・切替はサイドバー上部のライブラリ名から行えます</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SMART FOLDER MODAL ===== -->
+  <div id="smart-folder-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content settings-modal-content">
+      <div class="modal-header">
+        <span>Smart Folder</span>
+        <button class="modal-close" id="smart-folder-close">✕</button>
+      </div>
+      <div id="smart-folder-body">
+        <div class="settings-section">
+          <div class="settings-row">
+            <div class="settings-label">Name</div>
+            <input type="text" id="sf-name" class="settings-input" placeholder="Smart Folder name">
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">Tags (comma-separated, AND)</div>
+            <input type="text" id="sf-tags" class="settings-input" placeholder="tag1, tag2">
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">Rating ≥</div>
+            <select id="sf-rating-min" class="settings-input">
+              <option value="0">Any</option>
+              <option value="1">★1+</option>
+              <option value="2">★2+</option>
+              <option value="3">★3+</option>
+              <option value="4">★4+</option>
+              <option value="5">★5</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">Color</div>
+            <select id="sf-color" class="settings-input">
+              <option value="">Any</option>
+              <option value="red">Red</option>
+              <option value="orange">Orange</option>
+              <option value="yellow">Yellow</option>
+              <option value="green">Green</option>
+              <option value="cyan">Cyan</option>
+              <option value="blue">Blue</option>
+              <option value="purple">Purple</option>
+              <option value="pink">Pink</option>
+              <option value="gray">Gray</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">Extensions (comma-separated)</div>
+            <input type="text" id="sf-exts" class="settings-input" placeholder="mp4, mov">
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">Name contains</div>
+            <input type="text" id="sf-name-contains" class="settings-input">
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">Source URL contains</div>
+            <input type="text" id="sf-url-contains" class="settings-input">
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">Added after</div>
+            <input type="date" id="sf-date-from" class="settings-input">
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">Added before</div>
+            <input type="date" id="sf-date-to" class="settings-input">
+          </div>
+          <div class="settings-row">
+            <button id="sf-save" class="settings-btn-primary">Save</button>
           </div>
         </div>
       </div>

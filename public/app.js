@@ -152,18 +152,43 @@ function renderFolderTree(node, container, depth) {
   }
 }
 
+// スマートフォルダの条件判定（v1はAND固定）
+function matchesSmartFolder(file, rules) {
+  if (rules.tags && rules.tags.length > 0) {
+    if (!file.tags || !rules.tags.every(t => file.tags.includes(t))) return false;
+  }
+  if (rules.ratingMin && (file.rating || 0) < rules.ratingMin) return false;
+  if (rules.color && file.color !== rules.color) return false;
+  if (rules.exts && rules.exts.length > 0) {
+    if (!rules.exts.includes((file.ext || '').toLowerCase())) return false;
+  }
+  if (rules.nameContains) {
+    if (!file.name.toLowerCase().includes(rules.nameContains.toLowerCase())) return false;
+  }
+  if (rules.urlContains) {
+    if (!file.url || !file.url.toLowerCase().includes(rules.urlContains.toLowerCase())) return false;
+  }
+  if (rules.dateFrom && file.mtime < rules.dateFrom) return false;
+  if (rules.dateTo && file.mtime > rules.dateTo) return false;
+  return true;
+}
+
 // ===== FILTERS =====
 function applyFilters() {
   let files = [...state.files];
 
   if (state.activeNav === 'collection' && state.activeCollection) {
     const col = state.collections.find(c => c.id === state.activeCollection);
-    const ids = col ? col.items : [];
-    // コレクションの並び順を保持
-    const idOrder = {};
-    ids.forEach((id, i) => { idOrder[id] = i; });
-    files = files.filter(f => idOrder[f.id] !== undefined);
-    files.sort((a, b) => idOrder[a.id] - idOrder[b.id]);
+    if (col && col.type === 'smart') {
+      files = files.filter(f => matchesSmartFolder(f, col.rules || {}));
+    } else {
+      const ids = col ? col.items : [];
+      // コレクションの並び順を保持
+      const idOrder = {};
+      ids.forEach((id, i) => { idOrder[id] = i; });
+      files = files.filter(f => idOrder[f.id] !== undefined);
+      files.sort((a, b) => idOrder[a.id] - idOrder[b.id]);
+    }
   } else if (state.activeNav === 'folder' && state.activeFolder) {
     files = files.filter(f => f.folder === state.activeFolder || f.folder.startsWith(state.activeFolder + '/'));
   } else if (state.activeNav === 'tag' && state.activeTag) {
@@ -1369,15 +1394,20 @@ function renderCollections() {
   const list = document.getElementById('collection-list');
   list.innerHTML = '';
   state.collections.forEach(function(col) {
+    const isSmart = col.type === 'smart';
+    const count = isSmart
+      ? state.files.filter(function(f) { return matchesSmartFolder(f, col.rules || {}); }).length
+      : (col.items || []).length;
     const item = document.createElement('div');
     item.className = 'collection-item' + (state.activeCollection === col.id ? ' active' : '');
     item.innerHTML =
-      '<span class="col-icon">\uD83D\uDDC2</span>' +
+      '<span class="col-icon">' + (isSmart ? '\uD83D\uDD0D' : '\uD83D\uDDC2') + '</span>' +
       '<span class="col-name">' + col.name + '</span>' +
-      '<span class="col-count">' + (col.items || []).length + '</span>' +
+      '<span class="col-count">' + count + '</span>' +
+      (isSmart ? '<button class="col-edit" data-id="' + col.id + '">\u270E</button>' : '') +
       '<button class="col-delete" data-id="' + col.id + '">\u2715</button>';
     item.addEventListener('click', function(e) {
-      if (e.target.classList.contains('col-delete')) return;
+      if (e.target.classList.contains('col-delete') || e.target.classList.contains('col-edit')) return;
       state.activeCollection = state.activeCollection === col.id ? null : col.id;
       state.activeNav = state.activeCollection ? 'collection' : 'all';
       document.querySelectorAll('.nav-item,.folder-item,.tag-pill-nav,.collection-item').forEach(function(el) { el.classList.remove('active'); });
@@ -1385,6 +1415,12 @@ function renderCollections() {
       document.getElementById('breadcrumb').textContent = col.name;
       applyFilters();
     });
+    if (isSmart) {
+      item.querySelector('.col-edit').addEventListener('click', function(e) {
+        e.stopPropagation();
+        openSmartFolderModal(col);
+      });
+    }
     item.querySelector('.col-delete').addEventListener('click', async function(e) {
       e.stopPropagation();
       if (!confirm('"' + col.name + '" \u3092\u524A\u9664\u3057\u307E\u3059\u304B\uFF1F')) return;
@@ -1396,6 +1432,63 @@ function renderCollections() {
     list.appendChild(item);
   });
 }
+
+// ===== SMART FOLDER MODAL =====
+let smartFolderEditingId = null;
+
+function openSmartFolderModal(col) {
+  smartFolderEditingId = col ? col.id : null;
+  const rules = (col && col.rules) || {};
+  document.getElementById('sf-name').value = col ? col.name : '';
+  document.getElementById('sf-tags').value = (rules.tags || []).join(', ');
+  document.getElementById('sf-rating-min').value = rules.ratingMin || 0;
+  document.getElementById('sf-color').value = rules.color || '';
+  document.getElementById('sf-exts').value = (rules.exts || []).join(', ');
+  document.getElementById('sf-name-contains').value = rules.nameContains || '';
+  document.getElementById('sf-url-contains').value = rules.urlContains || '';
+  document.getElementById('sf-date-from').value = rules.dateFrom ? new Date(rules.dateFrom).toISOString().slice(0, 10) : '';
+  document.getElementById('sf-date-to').value = rules.dateTo ? new Date(rules.dateTo).toISOString().slice(0, 10) : '';
+  document.getElementById('smart-folder-modal').classList.remove('hidden');
+}
+
+function closeSmartFolderModal() {
+  document.getElementById('smart-folder-modal').classList.add('hidden');
+  smartFolderEditingId = null;
+}
+
+document.getElementById('new-smart-folder-btn').addEventListener('click', function() {
+  openSmartFolderModal(null);
+});
+document.getElementById('smart-folder-close').addEventListener('click', closeSmartFolderModal);
+document.getElementById('smart-folder-modal').addEventListener('click', function(e) {
+  if (e.target === e.currentTarget || e.target.classList.contains('modal-backdrop')) closeSmartFolderModal();
+});
+document.getElementById('sf-save').addEventListener('click', async function() {
+  const name = document.getElementById('sf-name').value.trim();
+  if (!name) { showToast('\u540D\u524D\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044'); return; }
+  const dateFrom = document.getElementById('sf-date-from').value;
+  const dateTo = document.getElementById('sf-date-to').value;
+  const rules = {
+    tags: document.getElementById('sf-tags').value.split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    ratingMin: parseInt(document.getElementById('sf-rating-min').value, 10) || 0,
+    color: document.getElementById('sf-color').value || null,
+    exts: document.getElementById('sf-exts').value.split(',').map(function(s) { return s.trim().toLowerCase().replace(/^\./, ''); }).filter(Boolean),
+    nameContains: document.getElementById('sf-name-contains').value.trim(),
+    urlContains: document.getElementById('sf-url-contains').value.trim(),
+    dateFrom: dateFrom ? new Date(dateFrom).getTime() : null,
+    dateTo: dateTo ? new Date(dateTo).getTime() + 24 * 60 * 60 * 1000 - 1 : null,
+  };
+  try {
+    if (smartFolderEditingId) {
+      await api('PUT', '/collections/' + smartFolderEditingId, { name, rules });
+    } else {
+      await api('POST', '/collections', { name, type: 'smart', rules });
+    }
+    closeSmartFolderModal();
+    await loadCollections();
+    applyFilters();
+  } catch (err) { showToast('\u30A8\u30E9\u30FC: ' + err.message); }
+});
 
 document.getElementById('new-collection-btn').addEventListener('click', function() {
   const input = document.createElement('input');

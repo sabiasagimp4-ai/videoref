@@ -826,11 +826,13 @@ app.get('/api/collections', (req, res) => {
   res.json(loadCollections());
 });
 
-// POST /api/collections — 新規作成
+// POST /api/collections — 新規作成（通常コレクション or スマートフォルダ）
 app.post('/api/collections', (req, res) => {
-  const { name } = req.body;
+  const { name, type, rules } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
-  const col = { id: Date.now().toString(36), name, items: [] };
+  const col = type === 'smart'
+    ? { id: Date.now().toString(36), name, type: 'smart', rules: rules || {} }
+    : { id: Date.now().toString(36), name, items: [] };
   const cols = [...loadCollections(), col];
   saveCollections(cols);
   res.json(col);

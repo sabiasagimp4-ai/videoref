@@ -88,6 +88,12 @@ body { font-family: -apple-system, "Segoe UI", sans-serif; font-size: 13px; colo
 }
 .collection-item:hover .col-delete { opacity: 1; }
 .collection-item .col-delete:hover { color: var(--red); }
+.collection-item .col-edit {
+  background: none; border: none; color: var(--text-3); cursor: pointer;
+  font-size: 11px; padding: 1px 3px; opacity: 0; transition: opacity 0.1s;
+}
+.collection-item:hover .col-edit { opacity: 1; }
+.collection-item .col-edit:hover { color: var(--text-1); }
 
 .collection-name-input {
   background: var(--bg-3); border: 1px solid var(--accent); color: var(--text-1);
@@ -208,6 +214,19 @@ kbd {
   background: var(--bg-3); padding: 6px 10px; border-radius: var(--radius-sm);
   word-break: break-all;
 }
+.settings-input {
+  width: 100%; box-sizing: border-box; background: var(--bg-3);
+  border: 1px solid var(--border); color: var(--text-1); font-size: 12px;
+  padding: 7px 10px; border-radius: var(--radius-sm); outline: none;
+}
+.settings-input:focus { border-color: var(--accent); }
+.settings-btn-primary {
+  background: var(--accent); border: none; color: #fff; font-size: 13px;
+  font-weight: 500; padding: 7px 16px; border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.settings-btn-primary:hover { opacity: 0.9; }
+.nav-section-actions { display: flex; gap: 4px; }
 
 /* ===== MAIN ===== */
 #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-0); }
