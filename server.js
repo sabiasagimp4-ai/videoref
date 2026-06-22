@@ -754,9 +754,26 @@ app.delete('/api/download/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+function loadCollections() {
+  try {
+    if (fs.existsSync(COLLECTIONS_PATH)) return JSON.parse(fs.readFileSync(COLLECTIONS_PATH, 'utf-8'));
+  } catch (e) { console.error('[loadCollections] error:', e.message); }
+  return [];
+}
+function saveCollections(data) {
+  const tmp = COLLECTIONS_PATH + '.tmp';
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+    fs.renameSync(tmp, COLLECTIONS_PATH);
+  } catch (e) {
+    console.error('[saveCollections] error:', e.message);
+    try { fs.unlinkSync(tmp); } catch (_) {}
+  }
+}
+
 // GET /api/collections
 app.get('/api/collections', (req, res) => {
-  res.json(settings.collections || []);
+  res.json(loadCollections());
 });
 
 // POST /api/collections — 新規作成
@@ -764,26 +781,25 @@ app.post('/api/collections', (req, res) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
   const col = { id: Date.now().toString(36), name, items: [] };
-  settings.collections = [...(settings.collections || []), col];
-  saveSettings(settings);
+  const cols = [...loadCollections(), col];
+  saveCollections(cols);
   res.json(col);
 });
 
 // PUT /api/collections/:id — 更新（名前変更・items並び替え）
 app.put('/api/collections/:id', (req, res) => {
-  const cols = settings.collections || [];
+  const cols = loadCollections();
   const idx = cols.findIndex(c => c.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'not found' });
   cols[idx] = { ...cols[idx], ...req.body, id: req.params.id };
-  settings.collections = cols;
-  saveSettings(settings);
+  saveCollections(cols);
   res.json(cols[idx]);
 });
 
 // DELETE /api/collections/:id — 削除
 app.delete('/api/collections/:id', (req, res) => {
-  settings.collections = (settings.collections || []).filter(c => c.id !== req.params.id);
-  saveSettings(settings);
+  const cols = loadCollections().filter(c => c.id !== req.params.id);
+  saveCollections(cols);
   res.json({ ok: true });
 });
 
