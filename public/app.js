@@ -214,7 +214,8 @@ function applyFilters() {
     files = files.filter(f =>
       f.name.toLowerCase().includes(q) ||
       (f.tags && f.tags.some(t => t.toLowerCase().includes(q))) ||
-      (f.note && f.note.toLowerCase().includes(q))
+      (f.note && f.note.toLowerCase().includes(q)) ||
+      (f.url && f.url.toLowerCase().includes(q))
     );
   }
 
@@ -1181,6 +1182,49 @@ document.addEventListener('drop', function(e) {
   openImportModeModal(paths);
 });
 
+// ===== CLIPBOARD PASTE IMPORT =====
+document.addEventListener('paste', function(e) {
+  const target = e.target;
+  const isEditable = target && (
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.isContentEditable
+  );
+  if (isEditable) return; // 通常のテキスト貼り付けは妨げない
+
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  let imageItem = null;
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type && items[i].type.startsWith('image/')) {
+      imageItem = items[i];
+      break;
+    }
+  }
+  if (!imageItem) return;
+
+  e.preventDefault();
+  const blob = imageItem.getAsFile();
+  if (!blob) return;
+  pasteImageBlob(blob);
+});
+
+async function pasteImageBlob(blob) {
+  try {
+    const r = await fetch('/api/paste', {
+      method: 'POST',
+      headers: { 'Content-Type': blob.type || 'image/png' },
+      body: blob,
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    await loadFiles();
+    showToast('クリップボードの画像を取り込みました');
+  } catch (e) {
+    showToast('クリップボードの画像の取り込みに失敗しました: ' + e.message);
+  }
+}
+
 function openImportModeModal(paths) {
   pendingImportPaths = paths;
   document.getElementById('import-mode-summary').textContent = paths.length + ' 件のファイルを追加します';
@@ -1347,7 +1391,7 @@ function initUI() {
     clearTimeout(searchTimer);
     state.search = e.target.value;
     document.getElementById('search-clear').classList.toggle('hidden', !state.search);
-    searchTimer = setTimeout(applyFilters, 200);
+    searchTimer = setTimeout(applyFilters, 150);
   });
 document.getElementById('search-clear').addEventListener('click', function() {
   state.search = '';

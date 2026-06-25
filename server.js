@@ -885,6 +885,48 @@ app.get('/api/import/:id', (req, res) => {
   res.json(job);
 });
 
+// POST /api/paste — クリップボードの画像を取り込み（このルートのみ生バイナリを受け付ける）
+app.post('/api/paste', express.raw({ type: ['image/png', 'image/jpeg', 'image/*'], limit: '50mb' }), async (req, res) => {
+  const body = req.body;
+  if (!Buffer.isBuffer(body) || body.length === 0) {
+    return res.status(400).json({ error: 'image data required' });
+  }
+
+  // 取り込み開始時点のライブラリをスナップショット（途中でライブラリが
+  // 切り替わっても、現在アクティブな別ライブラリへ取り込んでしまわないため）
+  const jobLibraryPath = LIBRARY_PATH;
+
+  const contentType = (req.headers['content-type'] || '').toLowerCase();
+  let ext = '.png';
+  if (contentType.includes('jpeg') || contentType.includes('jpg')) ext = '.jpg';
+  else if (contentType.includes('png')) ext = '.png';
+
+  try {
+    const baseName = 'pasted_' + Date.now();
+    let destName = baseName + ext;
+    let destPath = path.join(jobLibraryPath, destName);
+    let n = 1;
+    while (fs.existsSync(destPath)) {
+      destName = `${baseName} (${n})${ext}`;
+      destPath = path.join(jobLibraryPath, destName);
+      n++;
+    }
+    fs.writeFileSync(destPath, body);
+
+    const rel = path.relative(jobLibraryPath, destPath).replace(/\\/g, '/');
+    const id = Buffer.from(rel).toString('base64url');
+
+    if (jobLibraryPath === LIBRARY_PATH) {
+      const allFiles = await scanDir(jobLibraryPath, jobLibraryPath);
+      startBackgroundThumbGen(allFiles.filter(f => f.type === 'video'));
+    }
+
+    res.json({ id, name: destName });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // ===== 重複検出（Eagle同様: 完全一致のみ。サイズ→SHA-256で確定） =====
 let duplicateScanJob = null; // { status: 'running'|'done'|'error', total, done }
 let lastDuplicateGroups = []; // [{ hash, size, ids: [...] }]
