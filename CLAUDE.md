@@ -13,6 +13,7 @@
 - [`.claude/rules/architecture.md`](.claude/rules/architecture.md) — 3層構成の責務
 - [`.claude/rules/release.md`](.claude/rules/release.md) — ビルド・リリース手順
 - [`.claude/rules/code-review-graph.md`](.claude/rules/code-review-graph.md) — グラフ優先のコード探索
+- [`.claude/rules/testing.md`](.claude/rules/testing.md) — 実ブラウザ検証ハーネスと隔離の鉄則
 
 ---
 
@@ -48,18 +49,34 @@ npx electron .
 | VIDEOREF_FFPROBE | ffprobeバイナリパス |
 | VIDEOREF_YTDLP | yt-dlpバイナリパス |
 
-## 残タスク
+## 現在の状態（2026-06-25 時点・v1.4.2）
 
-Low優先度（🔍ファイル参照）:
-- #16: autoUpdater リトライ強化
-- #17: ソフトデリート（ゴミ箱）
-- #18: EyeDropper フォールバック
+実装済み: ギャラリー/リスト・フォルダツリー・タグ/評価/カラー・インスペクタ・
+yt-dlp DL・コレクション・スマートフォルダ・D&D取込・完全一致重複検出・知覚ハッシュ
+類似検出・ウォッチフォルダ(chokidar)・マルチライブラリ・ゴミ箱・グローバル検索・
+クリップボード貼付け取込・テーマ/UIズーム/グレースケール・クイックルック。
+UIは日本語で統一済み。
 
-機能追加候補:
-- F1: 起動トークン認証
-- F2: chokidar ファイル監視
-- F3: バッチ操作
-- F4: SQLite DB化
+### 動画モーダルの設計方針（重要・崩さない）
+表示UIは **再生ボタン＋シークバーのみ**。速度/コマ送り/回転/全画面などは
+Eagle 準拠キーボードショートカット（Space, `[ ]`, Shift+`[ ]`, Ctrl+←→, Shift+`,.`,
+Shift+R, F）。**`<video>` に `controls` を戻さない**こと。キー判定は配列非依存の `e.code`。
+キーボードハンドラは `app.js` の keydown 内「動画モーダル: Eagle準拠ショートカット」ブロック。
+
+### 次の機能候補（ロードマップ）
+- C4: 手動ドラッグ並び替え（順序をセッション間で保持）
+- C2: タググループ/階層
+- E2/E3: メタデータ CSV 書き出し／メタ駆動の一括リネーム
+- 保留（要確認・範囲大）: A7/B3 URLショートカット項目（新しい非メディア型の導入）
+- 旧Low: autoUpdater リトライ強化 / EyeDropper フォールバック / SQLite DB化
+
+計画書: [`docs/superpowers/specs/2026-06-25-feature-gap-plan.md`](docs/superpowers/specs/2026-06-25-feature-gap-plan.md)
+
+### 既知の構造的注意点
+`app.js` の `initUI()` が多数の関数を内包しており、グローバル関数から呼ぶと
+ReferenceError になる罠がある（4関数は `window.X = X` で橋渡し済み）。新たに
+グローバルから initUI 内の関数を呼ぶ場合は同様の橋渡しが必要。詳細は testing.md /
+メモリ参照。
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
