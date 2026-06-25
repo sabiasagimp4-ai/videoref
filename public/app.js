@@ -19,6 +19,15 @@ const state = {
   lastClickedId: null,
   libraries: [],
   activeLibraryId: null,
+  theme: 'theme-dark',
+  uiZoom: 100,
+  grayscale: false,
+  player: {
+    fps: 30,
+    loopIn: null,
+    loopOut: null,
+    looping: false,
+  },
 };
 
 const COLOR_MAP = {
@@ -613,10 +622,27 @@ function openVideoModal(file) {
   document.getElementById('modal-title').textContent = file.name;
   document.getElementById('modal-video').src = '/api/video/' + file.id;
   document.getElementById('video-modal').classList.remove('hidden');
-  document.getElementById('modal-video').play().catch(function() {});
+  const vid = document.getElementById('modal-video');
+  vid.playbackRate = 1;
+  const speedSel = document.getElementById('pc-speed');
+  if (speedSel) speedSel.value = '1';
+  // フレームステップ用fps（メタデータにあれば使用、無ければ既定30）
+  state.player.fps = (file && file.fps) ? file.fps : 30;
+  state.player.loopIn = null;
+  state.player.loopOut = null;
+  state.player.looping = false;
+  updateLoopUI();
+  vid.play().catch(function() {});
 }
 
 function closeVideoModal() {
+  // プレイヤー状態をリセット
+  state.player.loopIn = null;
+  state.player.loopOut = null;
+  state.player.looping = false;
+  updateLoopUI();
+  const loopBtn = document.getElementById('pc-loop-toggle');
+  if (loopBtn) loopBtn.classList.remove('active');
   const vid = document.getElementById('modal-video');
   vid.pause();
   vid.src = '';
@@ -1221,6 +1247,9 @@ function saveUIState() {
       sort: state.sort,
       view: state.view,
       thumbSize: state.thumbSize,
+      theme: state.theme,
+      uiZoom: state.uiZoom,
+      grayscale: state.grayscale,
     }));
   } catch (e) {}
 }
@@ -1232,7 +1261,28 @@ function loadUIState() {
     if (saved.sort) state.sort = saved.sort;
     if (saved.view) state.view = saved.view;
     if (saved.thumbSize) state.thumbSize = saved.thumbSize;
+    if (saved.theme) state.theme = saved.theme;
+    if (saved.uiZoom) state.uiZoom = saved.uiZoom;
+    if (typeof saved.grayscale === 'boolean') state.grayscale = saved.grayscale;
   } catch (e) {}
+}
+
+function applyTheme(themeClass) {
+  var body = document.body;
+  ['theme-dark', 'theme-midnight', 'theme-light', 'theme-sepia'].forEach(function(t) {
+    body.classList.remove(t);
+  });
+  body.classList.add(themeClass || 'theme-dark');
+}
+
+function applyUiZoom(zoom) {
+  document.documentElement.setAttribute('data-ui-zoom', String(zoom));
+}
+
+function applyGrayscale(on) {
+  document.body.classList.toggle('grayscale-mode', !!on);
+  var btn = document.getElementById('grayscale-toggle-btn');
+  if (btn) btn.classList.toggle('active', !!on);
 }
 
 function initUI() {
@@ -1256,6 +1306,41 @@ function initUI() {
     document.getElementById('gallery').style.setProperty('--thumb-size', state.thumbSize + 'px');
     saveUIState();
   });
+
+  // ----- D2 Theme -----
+  applyTheme(state.theme);
+  var themeSelect = document.getElementById('theme-select');
+  if (themeSelect) {
+    themeSelect.value = state.theme;
+    themeSelect.addEventListener('change', function(e) {
+      state.theme = e.target.value;
+      applyTheme(state.theme);
+      saveUIState();
+    });
+  }
+
+  // ----- D4 UI Zoom -----
+  applyUiZoom(state.uiZoom);
+  var uiZoomSlider = document.getElementById('ui-zoom-slider');
+  if (uiZoomSlider) {
+    uiZoomSlider.value = state.uiZoom;
+    uiZoomSlider.addEventListener('input', function(e) {
+      state.uiZoom = parseInt(e.target.value);
+      applyUiZoom(state.uiZoom);
+      saveUIState();
+    });
+  }
+
+  // ----- D5 Grayscale -----
+  applyGrayscale(state.grayscale);
+  var grayscaleBtn = document.getElementById('grayscale-toggle-btn');
+  if (grayscaleBtn) {
+    grayscaleBtn.addEventListener('click', function() {
+      state.grayscale = !state.grayscale;
+      applyGrayscale(state.grayscale);
+      saveUIState();
+    });
+  }
 
   var searchTimer;
   document.getElementById('search-input').addEventListener('input', function(e) {
@@ -1414,6 +1499,143 @@ videoCtxMenu.addEventListener('click', async function(e) {
   }
 });
 
+// ===== PLAYER CONTROLS (speed / frame step / segment loop / hover-scrub) =====
+function formatTimeShort(t) {
+  if (!isFinite(t) || t < 0) t = 0;
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function updateLoopUI() {
+  const inLabel = document.getElementById('pc-in-label');
+  const outLabel = document.getElementById('pc-out-label');
+  const range = document.getElementById('pc-loop-range');
+  if (inLabel) inLabel.textContent = state.player.loopIn != null ? 'IN ' + formatTimeShort(state.player.loopIn) : '';
+  if (outLabel) outLabel.textContent = state.player.loopOut != null ? 'OUT ' + formatTimeShort(state.player.loopOut) : '';
+  if (range) {
+    const dur = modalVideo.duration;
+    if (state.player.loopIn != null && state.player.loopOut != null && dur && isFinite(dur) && dur > 0) {
+      const leftPct = (state.player.loopIn / dur) * 100;
+      const widthPct = ((state.player.loopOut - state.player.loopIn) / dur) * 100;
+      range.style.left = leftPct + '%';
+      range.style.width = Math.max(widthPct, 0) + '%';
+      range.classList.remove('hidden');
+    } else {
+      range.classList.add('hidden');
+    }
+  }
+}
+
+function stepModalFrame(dir) {
+  if (!modalVideo || !modalVideo.src) return;
+  modalVideo.pause();
+  const step = 1 / (state.player.fps || 30);
+  modalVideo.currentTime = Math.max(0, modalVideo.currentTime + dir * step);
+}
+
+(function initPlayerControls() {
+  const speedSel = document.getElementById('pc-speed');
+  const prevFrameBtn = document.getElementById('pc-prev-frame');
+  const nextFrameBtn = document.getElementById('pc-next-frame');
+  const setInBtn = document.getElementById('pc-set-in');
+  const setOutBtn = document.getElementById('pc-set-out');
+  const loopToggleBtn = document.getElementById('pc-loop-toggle');
+  const clearLoopBtn = document.getElementById('pc-clear-loop');
+  const timeline = document.getElementById('pc-timeline');
+  const timelineFill = document.getElementById('pc-timeline-fill');
+  const tooltip = document.getElementById('pc-timeline-tooltip');
+  const tooltipTime = document.getElementById('pc-timeline-time');
+  const previewVideo = document.getElementById('pc-preview-video');
+  if (!speedSel || !timeline) return; // markup not present; no-op safely
+
+  speedSel.addEventListener('change', function() {
+    modalVideo.playbackRate = parseFloat(speedSel.value) || 1;
+  });
+
+  if (prevFrameBtn) prevFrameBtn.addEventListener('click', function() { stepModalFrame(-1); });
+  if (nextFrameBtn) nextFrameBtn.addEventListener('click', function() { stepModalFrame(1); });
+
+  if (setInBtn) setInBtn.addEventListener('click', function() {
+    state.player.loopIn = modalVideo.currentTime;
+    if (state.player.loopOut != null && state.player.loopIn >= state.player.loopOut) state.player.loopOut = null;
+    updateLoopUI();
+  });
+  if (setOutBtn) setOutBtn.addEventListener('click', function() {
+    state.player.loopOut = modalVideo.currentTime;
+    if (state.player.loopIn != null && state.player.loopOut <= state.player.loopIn) state.player.loopIn = null;
+    updateLoopUI();
+  });
+  if (clearLoopBtn) clearLoopBtn.addEventListener('click', function() {
+    state.player.loopIn = null;
+    state.player.loopOut = null;
+    updateLoopUI();
+  });
+  if (loopToggleBtn) loopToggleBtn.addEventListener('click', function() {
+    state.player.looping = !state.player.looping;
+    loopToggleBtn.classList.toggle('active', state.player.looping);
+  });
+
+  modalVideo.addEventListener('timeupdate', function() {
+    // タイムラインの進捗バー更新
+    const dur = modalVideo.duration;
+    if (dur && isFinite(dur) && dur > 0 && timelineFill) {
+      timelineFill.style.width = (modalVideo.currentTime / dur * 100) + '%';
+    }
+    // 区間ループ
+    if (state.player.looping && state.player.loopIn != null && state.player.loopOut != null) {
+      if (modalVideo.currentTime >= state.player.loopOut) {
+        modalVideo.currentTime = state.player.loopIn;
+      } else if (modalVideo.currentTime < state.player.loopIn) {
+        modalVideo.currentTime = state.player.loopIn;
+      }
+    }
+  });
+  modalVideo.addEventListener('loadedmetadata', updateLoopUI);
+
+  // ホバースクラブ：タイムタイムライン上でマウス位置のタイムスタンプ＋プレビュー動画
+  let previewFailed = false;
+  timeline.addEventListener('mousemove', function(e) {
+    const dur = modalVideo.duration;
+    if (!dur || !isFinite(dur) || dur <= 0) return;
+    const rect = timeline.getBoundingClientRect();
+    let ratio = (e.clientX - rect.left) / rect.width;
+    ratio = Math.min(1, Math.max(0, ratio));
+    const t = ratio * dur;
+    if (tooltipTime) tooltipTime.textContent = formatTimeShort(t);
+    if (tooltip) {
+      tooltip.style.left = (ratio * rect.width) + 'px';
+      tooltip.classList.remove('hidden');
+    }
+    if (previewVideo && !previewFailed) {
+      try {
+        if (!previewVideo.src) previewVideo.src = modalVideo.currentSrc || modalVideo.src;
+        previewVideo.currentTime = t;
+      } catch (err) {
+        previewFailed = true;
+        previewVideo.style.display = 'none';
+      }
+    }
+  });
+  if (previewVideo) {
+    previewVideo.addEventListener('error', function() {
+      previewFailed = true;
+      previewVideo.style.display = 'none';
+    });
+  }
+  timeline.addEventListener('mouseleave', function() {
+    if (tooltip) tooltip.classList.add('hidden');
+  });
+  timeline.addEventListener('click', function(e) {
+    const dur = modalVideo.duration;
+    if (!dur || !isFinite(dur) || dur <= 0) return;
+    const rect = timeline.getBoundingClientRect();
+    let ratio = (e.clientX - rect.left) / rect.width;
+    ratio = Math.min(1, Math.max(0, ratio));
+    modalVideo.currentTime = ratio * dur;
+  });
+})();
+
 // ===== TOAST =====
 function showToast(msg) {
   let toast = document.getElementById('toast');
@@ -1462,6 +1684,37 @@ document.getElementById('video-modal').addEventListener('click', function(e) {
 var _vmClose = document.querySelector('#video-modal .modal-close');
 if (_vmClose) _vmClose.addEventListener('click', closeVideoModal);
 document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeVideoModal(); });
+
+// ===== QUICK LOOK (D1) =====
+function quickLookOpen() {
+  const ov = document.getElementById('quicklook-overlay');
+  return !!ov && !ov.classList.contains('hidden');
+}
+function openQuickLook(file) {
+  if (!file) return;
+  if (file.type === 'video') {
+    // 動画は既存のモーダルプレイヤーを再利用
+    openVideoModal(file);
+    return;
+  }
+  const ov = document.getElementById('quicklook-overlay');
+  const img = document.getElementById('quicklook-img');
+  if (!ov || !img) return;
+  img.src = '/api/file/' + file.id;
+  img.alt = file.name || '';
+  ov.classList.remove('hidden');
+}
+function closeQuickLook() {
+  const ov = document.getElementById('quicklook-overlay');
+  const img = document.getElementById('quicklook-img');
+  if (!ov) return;
+  ov.classList.add('hidden');
+  if (img) img.src = '';
+}
+var _qlOverlay = document.getElementById('quicklook-overlay');
+if (_qlOverlay) {
+  _qlOverlay.addEventListener('click', closeQuickLook);
+}
 
 document.getElementById('reload-btn').addEventListener('click', loadFiles);
 
@@ -1943,9 +2196,9 @@ if (_mEdBtn) _mEdBtn.addEventListener('click', function() {
 
 // ===== KEYBOARD SHORTCUTS =====
 document.addEventListener('keydown', function(e) {
-  // input/textarea にフォーカス中は無視
+  // input/textarea/contenteditable にフォーカス中は無視
   const tag = document.activeElement.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || document.activeElement.isContentEditable) return;
   // モーダルが開いているときは矢印系だけ抑制
   const modalOpen = !document.getElementById('video-modal').classList.contains('hidden');
 
@@ -1973,21 +2226,39 @@ document.addEventListener('keydown', function(e) {
       break;
     }
     case ' ':
-      if (modalOpen) {
+      if (quickLookOpen()) {
+        e.preventDefault();
+        closeQuickLook();
+      } else if (modalOpen) {
         e.preventDefault();
         const v = document.getElementById('modal-video');
         v.paused ? v.play() : v.pause();
-      } else if (state.selected) {
-        e.preventDefault();
-        const iv = document.getElementById('inspector-video');
-        if (iv) iv.paused ? iv.play() : iv.pause();
+      } else {
+        const inspectorContent = document.getElementById('inspector-content');
+        const inspectorIsOpen = inspectorContent && !inspectorContent.classList.contains('hidden');
+        if (inspectorIsOpen && state.selected) {
+          e.preventDefault();
+          const iv = document.getElementById('inspector-video');
+          if (iv) iv.paused ? iv.play() : iv.pause();
+        } else if (state.selected) {
+          // インスペクタ未表示時は Space でクイックルックを開く
+          e.preventDefault();
+          openQuickLook(state.selected);
+        }
       }
+      break;
+    case ',':
+      if (modalOpen) { e.preventDefault(); stepModalFrame(-1); }
+      break;
+    case '.':
+      if (modalOpen) { e.preventDefault(); stepModalFrame(1); }
       break;
     case 'Enter':
       if (!modalOpen && state.selected) { e.preventDefault(); openVideoModal(state.selected); }
       break;
     case 'Escape':
-      if (modalOpen) { e.preventDefault(); closeVideoModal(); }
+      if (quickLookOpen()) { e.preventDefault(); closeQuickLook(); }
+      else if (modalOpen) { e.preventDefault(); closeVideoModal(); }
       break;
     case 'i': case 'I':
       if (!modalOpen) {

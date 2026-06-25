@@ -30,8 +30,53 @@
   --radius-sm: 4px;
 }
 
+/* ===== THEMES =====
+   デフォルトはダーク（:root の値をそのまま使用）。
+   body.theme-* クラスで CSS変数を上書きする。 */
+body.theme-midnight {
+  --bg-0: #0c0f1a; --bg-1: #11152a; --bg-2: #161b33;
+  --bg-3: #1d2440; --bg-4: #28305a; --border: #2a3258; --border-light: #3a4478;
+  --text-1: #e6e9ff; --text-2: #a8b0d6; --text-3: #6b73a0;
+  --accent: #5b8cff; --accent-hover: #7ea2ff; --accent-dim: rgba(91, 140, 255, 0.18);
+}
+body.theme-light {
+  --bg-0: #f4f4f6; --bg-1: #ffffff; --bg-2: #f0f0f2; --bg-3: #e7e7ea; --bg-4: #dadadf;
+  --border: #d8d8dc; --border-light: #c4c4ca;
+  --text-1: #1c1c1e; --text-2: #55555c; --text-3: #8a8a90;
+  --accent: #2f6fed; --accent-hover: #4d84f5; --accent-dim: rgba(47, 111, 237, 0.12);
+}
+body.theme-sepia {
+  --bg-0: #2b2420; --bg-1: #332b25; --bg-2: #3c322a; --bg-3: #463a30; --bg-4: #534436;
+  --border: #594a3c; --border-light: #6b5946;
+  --text-1: #f1e3cf; --text-2: #cdb89a; --text-3: #93805f;
+  --accent: #e0a05a; --accent-hover: #ecb377; --accent-dim: rgba(224, 160, 90, 0.18);
+}
+
 html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-0); }
 body { font-family: -apple-system, "Segoe UI", sans-serif; font-size: 13px; color: var(--text-1); }
+
+/* ===== UI ZOOM =====
+   html[data-ui-zoom] により base font-size を変化させる。
+   サムネイル(--thumb-size)とは独立して効く。 */
+html[data-ui-zoom="90"] { font-size: 90%; }
+html[data-ui-zoom="95"] { font-size: 95%; }
+html[data-ui-zoom="100"] { font-size: 100%; }
+html[data-ui-zoom="105"] { font-size: 105%; }
+html[data-ui-zoom="110"] { font-size: 110%; }
+html[data-ui-zoom="115"] { font-size: 115%; }
+html[data-ui-zoom="120"] { font-size: 120%; }
+html[data-ui-zoom="125"] { font-size: 125%; }
+
+/* ===== GRAYSCALE / VALUE STUDY TOGGLE ===== */
+body.grayscale-mode #gallery .card-thumb,
+body.grayscale-mode #gallery .card-video-thumb,
+body.grayscale-mode .list-thumb,
+body.grayscale-mode #modal-video,
+body.grayscale-mode #inspector-video,
+body.grayscale-mode #quicklook-img {
+  filter: grayscale(1);
+}
+#grayscale-toggle-btn.active { color: var(--accent) !important; }
 
 /* ===== LAYOUT ===== */
 #app { display: flex; height: 100vh; width: 100vw; overflow: hidden; }
@@ -564,7 +609,68 @@ kbd {
   font-size: 16px; padding: 2px 6px;
 }
 .modal-close:hover { color: var(--text-1); }
-#modal-video { width: 100%; max-height: calc(90vh - 52px); background: #000; display: block; }
+#modal-video { width: 100%; max-height: calc(70vh); background: #000; display: block; }
+
+/* ===== PLAYER CONTROLS (video modal) ===== */
+#player-controls {
+  background: var(--bg-2); border-top: 1px solid var(--border);
+  padding: 8px 12px; display: flex; flex-direction: column; gap: 8px;
+}
+.pc-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pc-btn {
+  background: var(--bg-3); border: 1px solid var(--border); color: var(--text-2);
+  font-size: 12px; padding: 4px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  transition: all 0.1s; white-space: nowrap;
+}
+.pc-btn:hover { background: var(--bg-4); color: var(--text-1); border-color: var(--border-light); }
+.pc-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+#pc-speed {
+  background: var(--bg-3); border: 1px solid var(--border); color: var(--text-2);
+  font-size: 12px; padding: 4px 6px; border-radius: var(--radius-sm); outline: none; cursor: pointer;
+}
+.pc-sep { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
+.pc-loop-label { font-size: 11px; color: var(--text-3); font-family: monospace; min-width: 40px; }
+
+.pc-timeline {
+  position: relative; height: 10px; background: var(--bg-4);
+  border-radius: 5px; cursor: pointer; overflow: visible;
+}
+.pc-timeline-fill {
+  position: absolute; top: 0; left: 0; height: 100%; width: 0%;
+  background: var(--accent); border-radius: 5px; pointer-events: none;
+}
+.pc-loop-range {
+  position: absolute; top: 0; height: 100%;
+  background: rgba(255, 197, 46, 0.35); border-left: 2px solid var(--yellow); border-right: 2px solid var(--yellow);
+  pointer-events: none;
+}
+.pc-timeline-tooltip {
+  position: absolute; bottom: 100%; transform: translateX(-50%); margin-bottom: 8px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  pointer-events: none; z-index: 20;
+}
+#pc-preview-video {
+  width: 120px; height: 67px; object-fit: cover; background: #000;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-light);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+}
+#pc-timeline-time {
+  background: rgba(0,0,0,0.85); color: #fff; font-size: 11px; font-family: monospace;
+  padding: 2px 7px; border-radius: 10px;
+}
+
+/* ===== QUICK LOOK ===== */
+#quicklook-overlay {
+  position: fixed; inset: 0; z-index: 1500;
+  background: rgba(0,0,0,0.92);
+  display: flex; align-items: center; justify-content: center;
+  cursor: zoom-out;
+}
+#quicklook-overlay.hidden { display: none; }
+#quicklook-img {
+  max-width: 92vw; max-height: 92vh; object-fit: contain;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+}
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
