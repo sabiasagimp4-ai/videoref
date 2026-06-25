@@ -455,7 +455,7 @@ function createListRow(file) {
 
 function updateStatus() {
   document.getElementById('status-count').textContent =
-    state.filtered.length + ' items' + (state.filtered.length !== state.files.length ? ' / ' + state.files.length + ' total' : '');
+    state.filtered.length + ' 件' + (state.filtered.length !== state.files.length ? ' / 全 ' + state.files.length + ' 件' : '');
   const selEl = document.getElementById('status-selected');
   if (selEl) {
     selEl.textContent = state.selectedIds.size > 0 ? state.selectedIds.size + ' 件選択中' : '';
@@ -482,13 +482,21 @@ function openInspector(file) {
   document.getElementById('inspector-content').classList.remove('hidden');
   document.getElementById('ins-name').textContent = file.name;
   document.getElementById('ins-meta').innerHTML =
-    '<div>Size: ' + formatSize(file.size) + '</div>' +
-    '<div>Type: ' + file.ext.toUpperCase() + '</div>' +
-    '<div>Modified: ' + formatDate(file.mtime) + '</div>' +
-    '<div>Path: ' + file.relPath + '</div>';
+    '<div>サイズ: ' + formatSize(file.size) + '</div>' +
+    '<div>種類: ' + file.ext.toUpperCase() + '</div>' +
+    '<div>更新日: ' + formatDate(file.mtime) + '</div>' +
+    '<div>パス: ' + file.relPath + '</div>';
+  // 画像は <img>、動画は <video> でプレビュー（画像を video に入れると壊れる）
+  const isImg = /^(png|jpe?g|gif|webp|bmp|svg|avif|tiff?|ico)$/i.test(file.ext || '');
   const vid = document.getElementById('inspector-video');
-  vid.src = '/api/video/' + file.id;
-  vid.load();
+  const img = document.getElementById('inspector-img');
+  if (isImg) {
+    if (img) { img.src = '/api/file/' + file.id; img.classList.remove('hidden'); }
+    vid.classList.add('hidden'); vid.pause(); vid.removeAttribute('src'); vid.load();
+  } else {
+    vid.src = '/api/video/' + file.id; vid.load(); vid.classList.remove('hidden');
+    if (img) { img.classList.add('hidden'); img.removeAttribute('src'); }
+  }
   state.inspectorMeta = {
     tags: (file.tags || []).slice(),
     note: file.note || '',
@@ -510,6 +518,8 @@ function closeInspector() {
   const vid = document.getElementById('inspector-video');
   vid.pause();
   vid.src = '';
+  const img = document.getElementById('inspector-img');
+  if (img) { img.classList.add('hidden'); img.removeAttribute('src'); }
 }
 
 function renderInspectorTags() {
@@ -1174,7 +1184,7 @@ function resetLibrarySwitchState() {
   if (allNav) allNav.classList.add('active');
   document.querySelectorAll('.folder-item').forEach(function(f) { f.classList.remove('active'); });
   document.querySelectorAll('.tag-pill-nav').forEach(function(t) { t.classList.remove('active'); });
-  document.getElementById('breadcrumb').textContent = 'Library';
+  document.getElementById('breadcrumb').textContent = 'ライブラリ';
 }
 
 async function loadLibraries() {
@@ -1568,8 +1578,8 @@ document.querySelectorAll('.nav-item').forEach(function(item) {
       document.getElementById('breadcrumb').textContent = '重複ファイル';
       loadDuplicatesView();
     } else {
-      const labels = { all: 'Library', untagged: 'Untagged', recent: 'Recently Added' };
-      document.getElementById('breadcrumb').textContent = labels[navKey] || 'Library';
+      const labels = { all: 'ライブラリ', untagged: '未タグ', recent: '最近追加' };
+      document.getElementById('breadcrumb').textContent = labels[navKey] || 'ライブラリ';
       applyFilters();
     }
   });
@@ -1951,10 +1961,10 @@ async function pollJob(jobId) {
     } else if (data.status === 'error') {
       clearInterval(timer);
       if (statusEl) { statusEl.textContent = '\u2715 Error'; statusEl.className = 'dl-job-status error'; }
-      if (filenameEl) filenameEl.textContent = data.log.join(' ') || 'Download failed';
+      if (filenameEl) filenameEl.textContent = data.log.join(' ') || 'ダウンロード失敗';
     } else if (data.status === 'cancelled') {
       clearInterval(timer);
-      if (statusEl) { statusEl.textContent = 'Cancelled'; statusEl.className = 'dl-job-status cancelled'; }
+      if (statusEl) { statusEl.textContent = 'キャンセル'; statusEl.className = 'dl-job-status cancelled'; }
     }
   }, 800);
   dlJobs[jobId] = timer;
@@ -1964,7 +1974,7 @@ async function cancelJob(jobId) {
   clearInterval(dlJobs[jobId]);
   try { await api('DELETE', '/download/' + jobId); } catch (e) {}
   const statusEl = document.getElementById('dl-status-' + jobId);
-  if (statusEl) { statusEl.textContent = 'Cancelled'; statusEl.className = 'dl-job-status cancelled'; }
+  if (statusEl) { statusEl.textContent = 'キャンセル'; statusEl.className = 'dl-job-status cancelled'; }
   const cancelBtn = document.getElementById('dl-cancel-' + jobId);
   if (cancelBtn) cancelBtn.style.display = 'none';
 }
@@ -2152,7 +2162,7 @@ document.getElementById('new-collection-btn').addEventListener('click', function
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'collection-name-input';
-  input.placeholder = 'Collection name...';
+  input.placeholder = 'コレクション名...';
   const list = document.getElementById('collection-list');
   list.insertBefore(input, list.firstChild);
   input.focus();
@@ -2441,7 +2451,9 @@ document.addEventListener('keydown', function(e) {
         if (inspectorIsOpen && state.selected) {
           e.preventDefault();
           const iv = document.getElementById('inspector-video');
-          if (iv) iv.paused ? iv.play() : iv.pause();
+          // 動画はインスペクタ内で再生/停止、画像はクイックルックを開く
+          if (iv && iv.getAttribute('src')) { iv.paused ? iv.play().catch(function() {}) : iv.pause(); }
+          else openQuickLook(state.selected);
         } else if (state.selected) {
           // インスペクタ未表示時は Space でクイックルックを開く
           e.preventDefault();

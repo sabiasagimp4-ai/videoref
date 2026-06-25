@@ -24,11 +24,11 @@
         <section class="nav-section">
           <div class="nav-item active" data-view="all">
             <svg class="nav-icon" viewBox="0 0 16 16"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
-            All Files
+            すべて
           </div>
           <div class="nav-item" data-view="untagged">
             <svg class="nav-icon" viewBox="0 0 16 16"><path d="M2 2h5l7 7-5 5-7-7V2zm3 2a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg>
-            Untagged
+            未タグ
           </div>
           <button class="nav-item" data-nav="trash">&#x1F5D1; &#x30B4;&#x30DF;&#x7B31;</button>
           <button class="nav-item" data-nav="duplicates">&#x1F500; &#x91CD;&#x8907;&#x30D5;&#x30A1;&#x30A4;&#x30EB;</button>
@@ -36,40 +36,40 @@
 
         <section class="nav-section">
           <div class="nav-section-title">
-            COLLECTIONS
+            コレクション
             <span class="nav-section-actions">
-              <button id="new-smart-folder-btn" title="New Smart Folder">🔍+</button>
-              <button id="new-collection-btn" title="New Collection">+</button>
+              <button id="new-smart-folder-btn" title="スマートフォルダを追加">🔍+</button>
+              <button id="new-collection-btn" title="コレクションを追加">+</button>
             </span>
           </div>
           <div id="collection-list"></div>
         </section>
 
         <section class="nav-section">
-          <div class="nav-section-title">FOLDERS</div>
+          <div class="nav-section-title">フォルダ</div>
           <div id="folder-tree"></div>
         </section>
 
         <section class="nav-section">
-          <div class="nav-section-title">TAGS</div>
+          <div class="nav-section-title">タグ</div>
           <div id="tag-list"></div>
         </section>
       </nav>
 
       <div id="sidebar-footer">
         <div id="lib-info">
-          <span id="file-count">0</span> files
+          <span id="file-count">0</span> 件
         </div>
         <div style="display:flex;gap:6px;align-items:center">
-          <select id="theme-select" title="Theme" style="background:var(--bg-3);border:1px solid var(--border);color:var(--text-2);font-size:11px;padding:3px 4px;border-radius:var(--radius-sm);outline:none;cursor:pointer;">
-            <option value="theme-dark">Dark</option>
-            <option value="theme-midnight">Midnight</option>
-            <option value="theme-light">Light</option>
-            <option value="theme-sepia">Sepia</option>
+          <select id="theme-select" title="テーマ" style="background:var(--bg-3);border:1px solid var(--border);color:var(--text-2);font-size:11px;padding:3px 4px;border-radius:var(--radius-sm);outline:none;cursor:pointer;">
+            <option value="theme-dark">ダーク</option>
+            <option value="theme-midnight">ミッドナイト</option>
+            <option value="theme-light">ライト</option>
+            <option value="theme-sepia">セピア</option>
           </select>
           <button id="grayscale-toggle-btn" title="グレースケール表示 (バリュー確認)" style="background:none;border:none;color:var(--text-3);cursor:pointer;padding:4px;font-size:13px;">◐</button>
-          <button id="shortcut-help-btn" title="Keyboard Shortcuts" style="background:none;border:none;color:var(--text-3);cursor:pointer;padding:4px;font-size:13px;">⌨</button>
-          <button id="settings-btn" title="Settings">
+          <button id="shortcut-help-btn" title="キーボードショートカット" style="background:none;border:none;color:var(--text-3);cursor:pointer;padding:4px;font-size:13px;">⌨</button>
+          <button id="settings-btn" title="設定">
             <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm0 1a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/><path d="M9.5 1h-3l-.5 1.5-1.3.75-1.5-.5-2.1 2.1.5 1.5L.85 7.5v3l1.25.65.5 1.5 2.1 2.1 1.5-.5 1.3.75.5 1.5h3l.5-1.5 1.3-.75 1.5.5 2.1-2.1-.5-1.5 1.25-.65v-3l-1.25-.65-.5-1.5-2.1-2.1-1.5.5-1.3-.75L9.5 1zm-.35 1l.35 1.1.6.35 1.15-.4 1.4 1.4-.4 1.15.35.6 1.1.35v2l-1.1.35-.35.6.4 1.15-1.4 1.4-1.15-.4-.6.35-.35 1.1H6.85l-.35-1.1-.6-.35-1.15.4-1.4-1.4.4-1.15-.35-.6L2.3 9v-2l1.1-.35.35-.6-.4-1.15 1.4-1.4 1.15.4.6-.35.35-1.1h2.3z"/></svg>
           </button>
         </div>
@@ -80,38 +80,39 @@
     <main id="main">
       <div id="topbar">
         <div id="topbar-left">
-          <div id="breadcrumb">Library</div>
+          <div id="breadcrumb">ライブラリ</div>
         </div>
         <div id="topbar-center">
           <div id="search-box">
             <svg viewBox="0 0 16 16" class="search-icon"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 11l3 3" stroke="currentColor" stroke-width="1.5"/></svg>
-            <input id="search-input" type="text" placeholder="Search files, tags..." autocomplete="off">
+            <input id="search-input" type="text" placeholder="ファイル・タグを検索..." autocomplete="off">
             <button id="search-clear" class="hidden">✕</button>
           </div>
         </div>
         <div id="topbar-right">
-          <button id="dl-open-btn" class="dl-open-btn" title="Download Video">
+          <button id="dl-open-btn" class="dl-open-btn" title="動画をダウンロード">
             <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a1 1 0 0 1 1 1v6.586l1.293-1.293a1 1 0 1 1 1.414 1.414l-3 3a1 1 0 0 1-1.414 0l-3-3a1 1 0 1 1 1.414-1.414L7 8.586V2a1 1 0 0 1 1-1zM2 12a1 1 0 0 1 1 1v1h10v-1a1 1 0 1 1 2 0v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2v-1a1 1 0 0 1 1-1z"/></svg>
-            Download
+            ダウンロード
           </button>
           <div class="sort-group">
             <select id="sort-select">
-              <option value="mtime-desc">Date ↓</option>
-              <option value="mtime-asc">Date ↑</option>
-              <option value="name-asc">Name A-Z</option>
-              <option value="name-desc">Name Z-A</option>
-              <option value="size-desc">Size ↓</option>
+              <option value="mtime-desc">日付 ↓</option>
+              <option value="mtime-asc">日付 ↑</option>
+              <option value="name-asc">名前 A→Z</option>
+              <option value="name-desc">名前 Z→A</option>
+              <option value="size-desc">サイズ ↓</option>
             </select>
           </div>
           <div class="view-toggle">
-            <button class="view-btn active" id="view-grid" title="Grid">
+            <button class="view-btn active" id="view-grid" title="グリッド表示">
               <svg viewBox="0 0 16 16"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
             </button>
-            <button class="view-btn" id="view-list" title="List">
+            <button class="view-btn" id="view-list" title="リスト表示">
               <svg viewBox="0 0 16 16"><rect x="1" y="2" width="14" height="2" rx="1"/><rect x="1" y="7" width="14" height="2" rx="1"/><rect x="1" y="12" width="14" height="2" rx="1"/></svg>
             </button>
           </div>
-          <div class="zoom-group">
+          <div class="zoom-group" title="サムネイルサイズ">
+            <svg viewBox="0 0 16 16" style="width:12px;height:12px;color:var(--text-3);flex-shrink:0" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>
             <input type="range" id="zoom-slider" min="100" max="320" value="200" step="20" title="サムネイルサイズ">
           </div>
           <div class="zoom-group" id="ui-zoom-group" title="UIズーム">
@@ -123,9 +124,9 @@
 
       <div id="filterbar">
         <div id="active-filters"></div>
-        <button id="reload-btn" title="Reload Library">
+        <button id="reload-btn" title="ライブラリを再読み込み">
           <svg viewBox="0 0 16 16"><path d="M13.5 2.5A6.5 6.5 0 1 0 14.5 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M14.5 2.5v4h-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Reload
+          更新
         </button>
       </div>
 
@@ -133,12 +134,12 @@
         <div id="gallery" class="grid-view"></div>
         <div id="empty-state" class="hidden">
           <div class="empty-icon">📂</div>
-          <div class="empty-title">No files found</div>
+          <div class="empty-title">ファイルがありません</div>
           <div class="empty-sub">ライブラリに動画を追加してください</div>
         </div>
         <div id="loading-state" class="hidden">
           <div class="spinner"></div>
-          <div>Loading library...</div>
+          <div>読み込み中...</div>
         </div>
         <div id="drop-overlay" class="hidden">
           <div class="drop-overlay-icon">📥</div>
@@ -147,7 +148,7 @@
       </div>
 
       <div id="statusbar">
-        <span id="status-count">0 items</span>
+        <span id="status-count">0 件</span>
         <span id="status-selected"></span>
       </div>
     </main>
@@ -155,7 +156,7 @@
     <!-- ===== INSPECTOR ===== -->
     <aside id="inspector">
       <div id="inspector-header">
-        <span>Info</span>
+        <span>情報</span>
       </div>
 
       <div id="inspector-empty">
@@ -166,25 +167,26 @@
       <div id="inspector-content" class="hidden">
         <div id="inspector-preview">
           <video id="inspector-video" controls preload="metadata"></video>
+          <img id="inspector-img" class="hidden" alt="">
         </div>
         <div id="inspector-body">
           <div class="inspector-name" id="ins-name">—</div>
           <div class="inspector-meta" id="ins-meta"></div>
 
           <div class="ins-section">
-            <div class="ins-label">Rating</div>
+            <div class="ins-label">評価</div>
             <div id="ins-rating" class="rating-stars"></div>
           </div>
 
           <div class="ins-section">
-            <div class="ins-label">Color Label</div>
+            <div class="ins-label">カラーラベル</div>
             <div id="ins-colors" class="color-dots"></div>
           </div>
 
           <!-- Palette + Eyedropper -->
           <div class="ins-section">
             <div class="ins-label" style="display:flex;align-items:center;justify-content:space-between">
-              <span>Palette</span>
+              <span>パレット</span>
               <div style="display:flex;gap:4px">
                 <button id="eyedropper-btn" class="palette-tool-btn" title="スポイト（画面の色を取得）">💉</button>
                 <button id="frame-eyedropper-btn" class="palette-tool-btn" title="動画フレームからスポイト">🎬</button>
@@ -204,29 +206,29 @@
           </div>
 
           <div class="ins-section">
-            <div class="ins-label">Tags</div>
+            <div class="ins-label">タグ</div>
             <div id="ins-tags" class="tag-area"></div>
             <div id="ins-tag-input-wrap">
-              <input id="ins-tag-input" type="text" placeholder="Add tag...">
+              <input id="ins-tag-input" type="text" placeholder="タグを追加...">
               <button id="ins-tag-add">+</button>
             </div>
           </div>
 
           <div class="ins-section">
-            <div class="ins-label">Note</div>
-            <textarea id="ins-note" placeholder="Add a note..."></textarea>
+            <div class="ins-label">ノート</div>
+            <textarea id="ins-note" placeholder="メモを追加..."></textarea>
           </div>
 
           <div class="ins-section">
-            <div class="ins-label">Source URL</div>
+            <div class="ins-label">取得元URL</div>
             <div id="ins-url-wrap">
               <input id="ins-url" type="text" placeholder="https://...">
-              <button id="ins-url-open" title="Open in browser">&#x2197;</button>
+              <button id="ins-url-open" title="ブラウザで開く">&#x2197;</button>
             </div>
           </div>
 
           <div class="ins-section" style="display:flex;gap:8px;align-items:center">
-            <button id="ins-open-btn" class="secondary-btn">Open Folder</button>
+            <button id="ins-open-btn" class="secondary-btn">フォルダを開く</button>
             <span id="ins-autosave-indicator" style="font-size:11px;color:var(--text-3)"></span>
           </div>
         </div>
@@ -282,24 +284,34 @@
       </div>
       <div id="shortcut-body">
         <div class="shortcut-group">
-          <div class="shortcut-group-title">Navigation</div>
+          <div class="shortcut-group-title">ナビゲーション</div>
           <div class="shortcut-row"><kbd>←</kbd><kbd>→</kbd> <span>前後の動画に移動</span></div>
+          <div class="shortcut-row"><kbd>Enter</kbd> <span>動画を開く</span></div>
+          <div class="shortcut-row"><kbd>Space</kbd> <span>再生 / 一時停止・クイックルック</span></div>
+          <div class="shortcut-row"><kbd>Esc</kbd> <span>閉じる</span></div>
+        </div>
+        <div class="shortcut-group">
+          <div class="shortcut-group-title">動画プレイヤー（Eagle準拠）</div>
           <div class="shortcut-row"><kbd>Space</kbd> <span>再生 / 一時停止</span></div>
-          <div class="shortcut-row"><kbd>Enter</kbd> <span>動画を全画面再生</span></div>
-          <div class="shortcut-row"><kbd>Esc</kbd> <span>モーダルを閉じる</span></div>
+          <div class="shortcut-row"><kbd>[</kbd><kbd>]</kbd> <span>コマ送り ±1</span></div>
+          <div class="shortcut-row"><kbd>Shift</kbd>+<kbd>[</kbd><kbd>]</kbd> <span>コマ送り ±10</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>←</kbd><kbd>→</kbd> <span>5秒 戻し / 送り</span></div>
+          <div class="shortcut-row"><kbd>Shift</kbd>+<kbd>,</kbd><kbd>.</kbd> <span>再生速度</span></div>
+          <div class="shortcut-row"><kbd>Shift</kbd>+<kbd>R</kbd> <span>回転</span></div>
+          <div class="shortcut-row"><kbd>F</kbd> <span>全画面</span></div>
         </div>
         <div class="shortcut-group">
-          <div class="shortcut-group-title">Inspector</div>
-          <div class="shortcut-row"><kbd>I</kbd> <span>Inspector 開閉</span></div>
+          <div class="shortcut-group-title">インスペクタ</div>
+          <div class="shortcut-row"><kbd>I</kbd> <span>インスペクタ開閉</span></div>
           <div class="shortcut-row"><kbd>T</kbd> <span>タグ入力にフォーカス</span></div>
-          <div class="shortcut-row"><kbd>S</kbd> <span>Save メタデータ</span></div>
+          <div class="shortcut-row"><kbd>S</kbd> <span>メタデータを保存</span></div>
         </div>
         <div class="shortcut-group">
-          <div class="shortcut-group-title">Library</div>
-          <div class="shortcut-row"><kbd>R</kbd> <span>ライブラリをリロード</span></div>
-          <div class="shortcut-row"><kbd>D</kbd> <span>Download モーダルを開く</span></div>
+          <div class="shortcut-group-title">ライブラリ</div>
+          <div class="shortcut-row"><kbd>R</kbd> <span>再読み込み</span></div>
+          <div class="shortcut-row"><kbd>D</kbd> <span>ダウンロードを開く</span></div>
           <div class="shortcut-row"><kbd>Delete</kbd><span>ゴミ箱に移動</span></div>
-          <div class="shortcut-row"><kbd>0</kbd>-<kbd>5</kbd><span>レーティング設定</span></div>
+          <div class="shortcut-row"><kbd>0</kbd>-<kbd>5</kbd><span>評価を設定</span></div>
         </div>
       </div>
     </div>
@@ -310,13 +322,13 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content dl-modal-content">
       <div class="modal-header">
-        <span>⬇ Download</span>
+        <span>⬇ ダウンロード</span>
         <button class="modal-close" id="dl-close">✕</button>
       </div>
       <div id="dl-body">
         <div class="dl-input-row">
           <input id="dl-url-input" type="text" placeholder="YouTube / X / Vimeo など URL を貼り付け..." spellcheck="false" autocomplete="off">
-          <button id="dl-start-btn" class="primary-btn">Download</button>
+          <button id="dl-start-btn" class="primary-btn">ダウンロード</button>
         </div>
         <div id="dl-jobs"></div>
       </div>
@@ -328,18 +340,18 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content settings-modal-content">
       <div class="modal-header">
-        <span>Settings</span>
+        <span>設定</span>
         <button class="modal-close" id="settings-close">✕</button>
       </div>
       <div id="settings-body">
         <div class="settings-section">
-          <div class="settings-section-title">Library</div>
+          <div class="settings-section-title">ライブラリ</div>
           <div class="settings-row">
-            <div class="settings-label">Current Path</div>
+            <div class="settings-label">現在のパス</div>
             <div id="settings-current-path" class="settings-current-path">—</div>
           </div>
           <div class="settings-row">
-            <div class="settings-label">Thumbnail Cache</div>
+            <div class="settings-label">サムネイルキャッシュ</div>
             <div id="settings-thumb-dir" class="settings-current-path">—</div>
           </div>
           <div class="settings-row">
@@ -366,23 +378,23 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content settings-modal-content">
       <div class="modal-header">
-        <span>Smart Folder</span>
+        <span>スマートフォルダ</span>
         <button class="modal-close" id="smart-folder-close">✕</button>
       </div>
       <div id="smart-folder-body">
         <div class="settings-section">
           <div class="settings-row">
-            <div class="settings-label">Name</div>
-            <input type="text" id="sf-name" class="settings-input" placeholder="Smart Folder name">
+            <div class="settings-label">名前</div>
+            <input type="text" id="sf-name" class="settings-input" placeholder="スマートフォルダ名">
           </div>
           <div class="settings-row">
-            <div class="settings-label">Tags (comma-separated, AND)</div>
+            <div class="settings-label">タグ（カンマ区切り・AND）</div>
             <input type="text" id="sf-tags" class="settings-input" placeholder="tag1, tag2">
           </div>
           <div class="settings-row">
-            <div class="settings-label">Rating ≥</div>
+            <div class="settings-label">評価 ≥</div>
             <select id="sf-rating-min" class="settings-input">
-              <option value="0">Any</option>
+              <option value="0">指定なし</option>
               <option value="1">★1+</option>
               <option value="2">★2+</option>
               <option value="3">★3+</option>
@@ -391,42 +403,42 @@
             </select>
           </div>
           <div class="settings-row">
-            <div class="settings-label">Color</div>
+            <div class="settings-label">カラー</div>
             <select id="sf-color" class="settings-input">
-              <option value="">Any</option>
-              <option value="red">Red</option>
-              <option value="orange">Orange</option>
-              <option value="yellow">Yellow</option>
-              <option value="green">Green</option>
-              <option value="cyan">Cyan</option>
-              <option value="blue">Blue</option>
-              <option value="purple">Purple</option>
-              <option value="pink">Pink</option>
-              <option value="gray">Gray</option>
+              <option value="">指定なし</option>
+              <option value="red">赤</option>
+              <option value="orange">オレンジ</option>
+              <option value="yellow">黄</option>
+              <option value="green">緑</option>
+              <option value="cyan">シアン</option>
+              <option value="blue">青</option>
+              <option value="purple">紫</option>
+              <option value="pink">ピンク</option>
+              <option value="gray">グレー</option>
             </select>
           </div>
           <div class="settings-row">
-            <div class="settings-label">Extensions (comma-separated)</div>
+            <div class="settings-label">拡張子（カンマ区切り）</div>
             <input type="text" id="sf-exts" class="settings-input" placeholder="mp4, mov">
           </div>
           <div class="settings-row">
-            <div class="settings-label">Name contains</div>
+            <div class="settings-label">名前に含む</div>
             <input type="text" id="sf-name-contains" class="settings-input">
           </div>
           <div class="settings-row">
-            <div class="settings-label">Source URL contains</div>
+            <div class="settings-label">取得元URLに含む</div>
             <input type="text" id="sf-url-contains" class="settings-input">
           </div>
           <div class="settings-row">
-            <div class="settings-label">Added after</div>
+            <div class="settings-label">追加日（以降）</div>
             <input type="date" id="sf-date-from" class="settings-input">
           </div>
           <div class="settings-row">
-            <div class="settings-label">Added before</div>
+            <div class="settings-label">追加日（以前）</div>
             <input type="date" id="sf-date-to" class="settings-input">
           </div>
           <div class="settings-row">
-            <button id="sf-save" class="settings-btn-primary">Save</button>
+            <button id="sf-save" class="settings-btn-primary">保存</button>
           </div>
         </div>
       </div>
