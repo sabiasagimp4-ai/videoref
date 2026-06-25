@@ -918,7 +918,7 @@ async function loadTrashView() {
   gallery.appendChild(frag);
 }
 
-// ===== DUPLICATE DETECTION（完全一致のみ） =====
+// ===== DUPLICATE DETECTION（完全一致 / 類似画像の2モード） =====
 async function loadDuplicatesView() {
   const gallery = document.getElementById('gallery');
   const empty = document.getElementById('empty-state');
@@ -927,13 +927,16 @@ async function loadDuplicatesView() {
   empty.classList.add('hidden');
   loading.classList.add('hidden');
 
+  // ----- 完全一致モード -----
   const actionRow = document.createElement('div');
   actionRow.style.cssText = 'padding:10px 16px;display:flex;align-items:center;gap:10px;';
   const scanBtn = document.createElement('button');
+  scanBtn.id = 'dup-exact-scan-btn';
   scanBtn.className = 'secondary-btn';
   scanBtn.style.width = 'auto';
-  scanBtn.textContent = '重複をスキャン';
+  scanBtn.textContent = '重複をスキャン（完全一致）';
   const statusText = document.createElement('span');
+  statusText.id = 'dup-exact-status';
   statusText.style.cssText = 'font-size:12px;color:var(--text-3);';
   actionRow.appendChild(scanBtn);
   actionRow.appendChild(statusText);
@@ -944,6 +947,33 @@ async function loadDuplicatesView() {
   resultsWrap.style.cssText = 'padding:0 16px 16px;';
   gallery.appendChild(resultsWrap);
 
+  // ----- 類似画像モード -----
+  const similarActionRow = document.createElement('div');
+  similarActionRow.style.cssText = 'padding:0 16px 10px;display:flex;align-items:center;gap:10px;border-top:1px solid var(--border);padding-top:14px;';
+  const similarScanBtn = document.createElement('button');
+  similarScanBtn.id = 'dup-similar-scan-btn';
+  similarScanBtn.className = 'secondary-btn';
+  similarScanBtn.style.width = 'auto';
+  similarScanBtn.textContent = '🔍 類似画像をスキャン';
+  const similarStatusText = document.createElement('span');
+  similarStatusText.id = 'dup-similar-status';
+  similarStatusText.style.cssText = 'font-size:12px;color:var(--text-3);';
+  similarActionRow.appendChild(similarScanBtn);
+  similarActionRow.appendChild(similarStatusText);
+  gallery.appendChild(similarActionRow);
+
+  const similarResultsWrap = document.createElement('div');
+  similarResultsWrap.id = 'similar-results';
+  similarResultsWrap.style.cssText = 'padding:0 16px 16px;';
+  gallery.appendChild(similarResultsWrap);
+
+  function totalGroupCount() {
+    const exactCount = resultsWrap.querySelectorAll('[data-dup-group]').length;
+    const simCount = similarResultsWrap.querySelectorAll('[data-sim-group]').length;
+    document.getElementById('status-count').textContent = (exactCount + simCount) + ' groups';
+  }
+
+  // --- 完全一致: スキャン & 表示 ---
   async function pollScan() {
     const job = await api('GET', '/duplicates/scan');
     if (job.status === 'running') {
@@ -976,13 +1006,13 @@ async function loadDuplicatesView() {
     }
     resultsWrap.innerHTML = '';
     if (groups.length === 0) {
-      resultsWrap.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:20px 0;">重複ファイルは見つかりませんでした（「重複をスキャン」を押してください）</div>';
-      document.getElementById('status-count').textContent = '0 groups';
+      resultsWrap.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:20px 0;">完全一致の重複ファイルは見つかりませんでした（「重複をスキャン」を押してください）</div>';
+      totalGroupCount();
       return;
     }
-    document.getElementById('status-count').textContent = groups.length + ' groups';
     groups.forEach(function(group, gi) {
       const groupEl = document.createElement('div');
+      groupEl.dataset.dupGroup = '1';
       groupEl.style.cssText = 'border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:10px;';
       const header = document.createElement('div');
       header.style.cssText = 'font-size:12px;color:var(--text-3);margin-bottom:8px;';
@@ -1026,6 +1056,93 @@ async function loadDuplicatesView() {
       groupEl.appendChild(mergeBtn);
       resultsWrap.appendChild(groupEl);
     });
+    totalGroupCount();
+  }
+
+  // --- 類似画像: スキャン & 表示 ---
+  async function pollSimilarScan() {
+    const job = await api('GET', '/similar/scan');
+    if (job.status === 'running') {
+      similarStatusText.textContent = 'スキャン中... ' + job.done + '/' + job.total;
+      setTimeout(pollSimilarScan, 600);
+    } else if (job.status === 'error') {
+      similarStatusText.textContent = 'スキャンに失敗しました';
+    } else {
+      similarStatusText.textContent = '';
+      await renderSimilarGroups();
+    }
+  }
+
+  similarScanBtn.addEventListener('click', async function() {
+    similarStatusText.textContent = 'スキャン中...';
+    similarResultsWrap.innerHTML = '';
+    try {
+      await api('POST', '/similar/scan');
+      pollSimilarScan();
+    } catch (e) { similarStatusText.textContent = 'エラー: ' + e.message; }
+  });
+
+  async function renderSimilarGroups() {
+    let groups;
+    try {
+      groups = await api('GET', '/similar');
+    } catch (e) {
+      similarResultsWrap.textContent = '結果の取得に失敗しました';
+      return;
+    }
+    similarResultsWrap.innerHTML = '';
+    if (groups.length === 0) {
+      similarResultsWrap.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:20px 0;">類似画像は見つかりませんでした（「類似画像をスキャン」を押してください）</div>';
+      totalGroupCount();
+      return;
+    }
+    groups.forEach(function(group, gi) {
+      const groupEl = document.createElement('div');
+      groupEl.dataset.simGroup = '1';
+      groupEl.style.cssText = 'border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:10px;';
+      const header = document.createElement('div');
+      header.style.cssText = 'font-size:12px;color:var(--text-3);margin-bottom:8px;';
+      header.textContent = group.files.length + ' 件（類似画像）';
+      groupEl.appendChild(header);
+
+      group.files.forEach(function(f, fi) {
+        const row = document.createElement('label');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;cursor:pointer;';
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'sim-keep-' + gi;
+        radio.value = f.id;
+        radio.checked = fi === 0;
+        row.appendChild(radio);
+        const label = document.createElement('span');
+        label.textContent = f.name + (f.tags.length ? '  [' + f.tags.join(', ') + ']' : '') + (f.rating ? '  ★' + f.rating : '');
+        row.appendChild(label);
+        groupEl.appendChild(row);
+      });
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'secondary-btn';
+      deleteBtn.style.cssText = 'width:auto;margin-top:6px;color:var(--red);border-color:var(--red);';
+      deleteBtn.textContent = '残す1件以外をゴミ箱へ移動';
+      deleteBtn.addEventListener('click', async function() {
+        const checked = groupEl.querySelector('input[name="sim-keep-' + gi + '"]:checked');
+        if (!checked) return;
+        const keepId = checked.value;
+        const removeIds = group.files.map(function(f) { return f.id; }).filter(function(id) { return id !== keepId; });
+        if (!confirm(removeIds.length + ' 件をゴミ箱へ移動します。よろしいですか？')) return;
+        try {
+          await api('POST', '/similar/delete', { ids: removeIds });
+          showToast('ゴミ箱へ移動しました');
+          await loadFiles();
+          state.activeNav = 'duplicates';
+          document.getElementById('breadcrumb').textContent = '重複ファイル';
+          await renderSimilarGroups();
+        } catch (e) { showToast('エラー: ' + e.message); }
+      });
+      groupEl.appendChild(deleteBtn);
+      similarResultsWrap.appendChild(groupEl);
+    });
+    totalGroupCount();
   }
 
   // 既存のスキャン結果があれば即表示。実行中なら進行状況をポーリング
@@ -1038,6 +1155,16 @@ async function loadDuplicatesView() {
       await renderDuplicateGroups();
     }
   } catch (e) { await renderDuplicateGroups(); }
+
+  try {
+    const simJob = await api('GET', '/similar/scan');
+    if (simJob.status === 'running') {
+      similarStatusText.textContent = 'スキャン中... ' + simJob.done + '/' + simJob.total;
+      pollSimilarScan();
+    } else {
+      await renderSimilarGroups();
+    }
+  } catch (e) { await renderSimilarGroups(); }
 }
 
 // ===== LIBRARY SWITCHER =====
@@ -1885,6 +2012,7 @@ async function openSettings() {
     document.getElementById('settings-current-path').textContent = s.libraryPath || '?';
     document.getElementById('settings-thumb-dir').textContent = s.thumbDir || '?';
   } catch (e) {}
+  await loadWatchFolders();
 }
 
 function closeSettings() {
@@ -1895,6 +2023,57 @@ document.getElementById('settings-btn').addEventListener('click', openSettings);
 document.getElementById('settings-close').addEventListener('click', closeSettings);
 document.getElementById('settings-modal').addEventListener('click', function(e) {
   if (e.target === e.currentTarget || e.target.classList.contains('modal-backdrop')) closeSettings();
+});
+
+// ===== WATCH FOLDERS（外部フォルダの自動取り込み） =====
+async function loadWatchFolders() {
+  const list = document.getElementById('watch-folder-list');
+  list.innerHTML = '';
+  let folders;
+  try {
+    folders = await api('GET', '/watch-folders');
+  } catch (e) {
+    list.innerHTML = '<div class="settings-label">読み込みに失敗しました</div>';
+    return;
+  }
+  if (!folders || folders.length === 0) {
+    list.innerHTML = '<div class="settings-label" style="color:var(--text-3);">登録されたフォルダはありません</div>';
+    return;
+  }
+  folders.forEach(function(folderPath) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 0;';
+    const pathEl = document.createElement('div');
+    pathEl.className = 'settings-current-path';
+    pathEl.style.flex = '1';
+    pathEl.textContent = folderPath;
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'secondary-btn';
+    removeBtn.style.width = 'auto';
+    removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', async function() {
+      try {
+        await api('DELETE', '/watch-folders', { path: folderPath });
+        showToast('ウォッチフォルダを削除しました');
+        await loadWatchFolders();
+      } catch (err) { showToast('エラー: ' + err.message); }
+    });
+    row.appendChild(pathEl);
+    row.appendChild(removeBtn);
+    list.appendChild(row);
+  });
+}
+
+document.getElementById('watch-folder-add').addEventListener('click', async function() {
+  const input = document.getElementById('watch-folder-input');
+  const folderPath = input.value.trim();
+  if (!folderPath) { showToast('フォルダパスを入力してください'); return; }
+  try {
+    await api('POST', '/watch-folders', { path: folderPath });
+    input.value = '';
+    showToast('ウォッチフォルダを追加しました');
+    await loadWatchFolders();
+  } catch (err) { showToast('エラー: ' + err.message); }
 });
 
 // ===== COLLECTIONS =====

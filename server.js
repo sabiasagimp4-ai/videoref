@@ -4,6 +4,7 @@ const path = require('path');
 const mime = require('mime-types');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+const chokidar = require('chokidar');
 
 const app = express();
 const PORT = parseInt(process.env.EAGLE_PORT || '3000', 10);
@@ -927,6 +928,121 @@ app.post('/api/paste', express.raw({ type: ['image/png', 'image/jpeg', 'image/*'
   }
 });
 
+// ===== ウォッチフォルダ（外部フォルダの新規ファイルを自動取り込み） =====
+// ウォッチャーはグローバル（ライブラリ単位ではない）。イベント発生時点でアクティブな
+// LIBRARY_PATH へコピーするため、switchLibrary時に再初期化する必要はない。
+const watchers = new Map(); // folderPath -> chokidar watcher
+
+// /api/import と同じ衝突回避命名（重複時は " (1)" のように連番を付与）でコピー先パスを決める
+function resolveCollisionSafeDestPath(libPath, baseName, ext) {
+  let destName = baseName + ext;
+  let destPath = path.join(libPath, destName);
+  let n = 1;
+  while (fs.existsSync(destPath)) {
+    destName = `${baseName} (${n})${ext}`;
+    destPath = path.join(libPath, destName);
+    n++;
+  }
+  return destPath;
+}
+
+function startWatcher(folderPath) {
+  if (watchers.has(folderPath)) return;
+  try {
+    const watcher = chokidar.watch(folderPath, {
+      ignoreInitial: true,
+      awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 200 },
+      depth: 99,
+    });
+    watcher.on('add', async (srcPath) => {
+      try {
+        const ext = path.extname(srcPath).toLowerCase();
+        if (!IMPORT_EXTS.includes(ext)) return;
+        if (!fs.existsSync(srcPath)) return;
+        // イベント発生時点でアクティブなライブラリへコピーする（ソースは絶対に削除しない）
+        const targetLibraryPath = LIBRARY_PATH;
+        const baseName = path.basename(srcPath, ext);
+        const destPath = resolveCollisionSafeDestPath(targetLibraryPath, baseName, ext);
+        fs.copyFileSync(srcPath, destPath);
+        console.log(`[watch] imported: ${srcPath} -> ${destPath}`);
+        if (targetLibraryPath === LIBRARY_PATH) {
+          const allFiles = await scanDir(targetLibraryPath, targetLibraryPath);
+          startBackgroundThumbGen(allFiles.filter((f) => f.type === 'video'));
+        }
+      } catch (e) {
+        console.error('[watch] import failed for', srcPath, ':', e.message);
+      }
+    });
+    watcher.on('error', (e) => {
+      console.error('[watch] watcher error for', folderPath, ':', e.message);
+    });
+    watchers.set(folderPath, watcher);
+  } catch (e) {
+    console.error('[watch] failed to start watcher for', folderPath, ':', e.message);
+  }
+}
+
+function stopWatcher(folderPath) {
+  const watcher = watchers.get(folderPath);
+  if (!watcher) return;
+  try { watcher.close(); } catch (e) { console.error('[watch] failed to close watcher:', e.message); }
+  watchers.delete(folderPath);
+}
+
+// GET /api/watch-folders — 登録済みウォッチフォルダ一覧
+app.get('/api/watch-folders', (req, res) => {
+  res.json(settings.watchFolders || []);
+});
+
+// POST /api/watch-folders — ウォッチフォルダ追加
+app.post('/api/watch-folders', (req, res) => {
+  const { path: folderPath } = req.body;
+  if (!folderPath) return res.status(400).json({ error: 'path required' });
+  if (!fs.existsSync(folderPath) || !fs.statSync(folderPath).isDirectory()) {
+    return res.status(400).json({ error: 'Path does not exist or is not a directory: ' + folderPath });
+  }
+  const normalized = path.normalize(folderPath);
+  const existing = settings.watchFolders || [];
+  if (existing.some((p) => path.normalize(p) === normalized)) {
+    return res.status(400).json({ error: 'This folder is already being watched' });
+  }
+  settings.watchFolders = [...existing, normalized];
+  saveSettings(settings);
+  startWatcher(normalized);
+  res.json({ ok: true, watchFolders: settings.watchFolders });
+});
+
+// DELETE /api/watch-folders — ウォッチフォルダ削除
+app.delete('/api/watch-folders', (req, res) => {
+  const { path: folderPath } = req.body;
+  if (!folderPath) return res.status(400).json({ error: 'path required' });
+  const normalized = path.normalize(folderPath);
+  const existing = settings.watchFolders || [];
+  if (!existing.some((p) => path.normalize(p) === normalized)) {
+    return res.status(404).json({ error: 'not found' });
+  }
+  settings.watchFolders = existing.filter((p) => path.normalize(p) !== normalized);
+  saveSettings(settings);
+  stopWatcher(normalized);
+  res.json({ ok: true, watchFolders: settings.watchFolders });
+});
+
+// 起動時に永続化済みのウォッチフォルダを再開する。不正なフォルダがあっても
+// サーバー起動自体は止めない（try/catchで個別に隔離）。
+function initWatchersFromSettings() {
+  for (const folderPath of (settings.watchFolders || [])) {
+    try {
+      if (fs.existsSync(folderPath) && fs.statSync(folderPath).isDirectory()) {
+        startWatcher(folderPath);
+      } else {
+        console.error('[watch] skip invalid folder on startup:', folderPath);
+      }
+    } catch (e) {
+      console.error('[watch] failed to init watcher for', folderPath, ':', e.message);
+    }
+  }
+}
+
 // ===== 重複検出（Eagle同様: 完全一致のみ。サイズ→SHA-256で確定） =====
 let duplicateScanJob = null; // { status: 'running'|'done'|'error', total, done }
 let lastDuplicateGroups = []; // [{ hash, size, ids: [...] }]
@@ -1069,6 +1185,195 @@ app.post('/api/duplicates/merge', (req, res) => {
   res.json({ ok: true, removed });
 });
 
+// ===== 類似画像検出（perceptual hash: dHash 64bit, Hamming距離でクラスタリング） =====
+let similarScanJob = null; // { status: 'running'|'done'|'error', total, done }
+let lastSimilarGroups = []; // [{ ids: [...] }]
+let lastSimilarLibraryPath = null; // スキャン時点のライブラリ（切替後は無効化するため）
+
+const SIMILAR_HASH_EXTS = new Set([...VIDEO_EXTS, ...IMAGE_EXTS]); // 音声は対象外
+
+// dHash: 9x8グレースケールのrawフレームから64bitの差分ハッシュを計算する
+// 行ごとに隣接ピクセル(col, col+1)の明暗を比較し、8列×8行=64bitを生成
+function computeDHashFromRaw(buf) {
+  if (!buf || buf.length < 72) return null; // 9*8=72バイト未満は不正
+  let hash = 0n;
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 8; col++) {
+      const left = buf[row * 9 + col];
+      const right = buf[row * 9 + col + 1];
+      hash = (hash << 1n) | (left < right ? 1n : 0n);
+    }
+  }
+  return hash;
+}
+
+// ffmpegで1フレームを9x8グレースケールrawに抽出してdHashを計算する。
+// -ss 1 が失敗する短い動画/静止画用に -ss 0 でリトライする。
+function computeFileDHash(fullPath) {
+  function tryExtract(seekSec) {
+    return new Promise((resolve) => {
+      const ff = spawn(FFMPEG_BIN, [
+        '-ss', String(seekSec), '-i', fullPath,
+        '-frames:v', '1', '-vf', 'scale=9:8,format=gray',
+        '-f', 'rawvideo', '-vcodec', 'rawvideo', 'pipe:1',
+      ]);
+      const chunks = [];
+      ff.stdout.on('data', (d) => chunks.push(d));
+      ff.stderr.on('data', () => {});
+      ff.on('error', () => resolve(null));
+      ff.on('close', () => {
+        const buf = Buffer.concat(chunks);
+        resolve(buf.length >= 72 ? buf : null);
+      });
+    });
+  }
+  return (async () => {
+    let buf = await tryExtract(1);
+    if (!buf) buf = await tryExtract(0);
+    if (!buf) return null;
+    return computeDHashFromRaw(buf);
+  })();
+}
+
+function hammingDistanceBigInt(a, b) {
+  let x = a ^ b;
+  let count = 0;
+  while (x > 0n) {
+    count += Number(x & 1n);
+    x >>= 1n;
+  }
+  return count;
+}
+
+const SIMILAR_THRESHOLD = 10;
+
+// シンプルなUnion-Find（greedy: 閾値以内のペアを併合）でグループ化する
+function clusterByHamming(items, threshold) {
+  const parent = items.map((_, i) => i);
+  function find(i) { while (parent[i] !== i) { i = parent[i]; } return i; }
+  function union(i, j) {
+    const ri = find(i), rj = find(j);
+    if (ri !== rj) parent[ri] = rj;
+  }
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      if (hammingDistanceBigInt(items[i].hash, items[j].hash) <= threshold) {
+        union(i, j);
+      }
+    }
+  }
+  const groups = new Map();
+  for (let i = 0; i < items.length; i++) {
+    const root = find(i);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(items[i].id);
+  }
+  return [...groups.values()].filter((ids) => ids.length > 1);
+}
+
+// POST /api/similar/scan — 類似画像スキャン開始（既に実行中なら新規開始しない）
+app.post('/api/similar/scan', (req, res) => {
+  if (similarScanJob && similarScanJob.status === 'running') {
+    return res.json({ ok: true, alreadyRunning: true });
+  }
+  const job = { status: 'running', total: 0, done: 0 };
+  similarScanJob = job;
+  res.json({ ok: true });
+
+  const scanLibraryPath = LIBRARY_PATH;
+  (async () => {
+    try {
+      const allFiles = await scanDir(scanLibraryPath, scanLibraryPath);
+      const targets = allFiles.filter((f) => SIMILAR_HASH_EXTS.has('.' + f.ext.toLowerCase()));
+      job.total = targets.length;
+
+      const items = [];
+      for (const f of targets) {
+        try {
+          const fullPath = path.join(scanLibraryPath, f.relPath);
+          const hash = await computeFileDHash(fullPath);
+          if (hash !== null) items.push({ id: f.id, hash });
+        } catch (e) {
+          console.error('[similar] hash error:', e.message);
+        }
+        job.done++;
+      }
+      const groups = clusterByHamming(items, SIMILAR_THRESHOLD).map((ids) => ({ ids }));
+      // スキャン中にライブラリが切り替わっていたら結果を捨てる
+      if (scanLibraryPath === LIBRARY_PATH) {
+        lastSimilarGroups = groups;
+        lastSimilarLibraryPath = scanLibraryPath;
+      }
+      job.status = 'done';
+    } catch (e) {
+      console.error('[similar] scan failed:', e.message);
+      job.status = 'error';
+    }
+  })();
+});
+
+// GET /api/similar/scan — 進行状況
+app.get('/api/similar/scan', (req, res) => {
+  res.json(similarScanJob || { status: 'idle', total: 0, done: 0 });
+});
+
+// GET /api/similar — 直近のスキャン結果（グループ化済み）
+app.get('/api/similar', (req, res) => {
+  if (lastSimilarLibraryPath !== LIBRARY_PATH) return res.json([]);
+  const meta = loadMeta();
+  const groups = lastSimilarGroups
+    .map((g) => ({
+      ids: g.ids,
+      files: g.ids
+        .map((id) => {
+          const filePath = decodeId(id);
+          if (!filePath || !fs.existsSync(filePath)) return null;
+          return {
+            id,
+            name: path.basename(filePath),
+            relPath: path.relative(LIBRARY_PATH, filePath).replace(/\\/g, '/'),
+            tags: meta[id]?.tags || [],
+            rating: meta[id]?.rating || 0,
+          };
+        })
+        .filter(Boolean),
+    }))
+    .filter((g) => g.files.length > 1);
+  res.json(groups);
+});
+
+// 単体削除と同じゴミ箱移動ロジック（複数ID分）。完全一致マージの「keep/remove」前提が
+// 類似画像では当てはまらない（メタデータ統合の意味が薄い）ため、専用の削除エンドポイントとする。
+app.post('/api/similar/delete', (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids required' });
+  fs.mkdirSync(TRASH_DIR, { recursive: true });
+  const meta = loadMeta();
+  const trash = loadTrash();
+  let deleted = 0;
+  for (const id of ids) {
+    const filePath = decodeId(id);
+    if (!filePath || !fs.existsSync(filePath)) continue;
+    const destName = id + '_' + path.basename(filePath);
+    try {
+      fs.renameSync(filePath, path.join(TRASH_DIR, destName));
+      trash.push({ id, name: path.basename(filePath), destName, deletedAt: new Date().toISOString() });
+      const tp = thumbPath(id);
+      if (fs.existsSync(tp)) fs.unlinkSync(tp);
+      thumbCache.delete(id);
+      delete meta[id];
+      deleted++;
+    } catch (e) { console.error('[similar-delete]', e.message); }
+  }
+  saveMeta(meta);
+  saveTrash(trash);
+  // 削除済みIDをキャッシュからも除去
+  lastSimilarGroups = lastSimilarGroups
+    .map((g) => ({ ...g, ids: g.ids.filter((id) => !ids.includes(id)) }))
+    .filter((g) => g.ids.length > 1);
+  res.json({ ok: true, deleted });
+});
+
 function loadCollections() {
   try {
     if (fs.existsSync(COLLECTIONS_PATH)) return JSON.parse(fs.readFileSync(COLLECTIONS_PATH, 'utf-8'));
@@ -1151,6 +1456,9 @@ function switchLibrary(id) {
   // 重複検出結果は別ライブラリのIDを指してしまうため無効化する
   lastDuplicateGroups = [];
   lastDuplicateLibraryPath = null;
+  // 類似画像検出結果も同様に無効化する
+  lastSimilarGroups = [];
+  lastSimilarLibraryPath = null;
   settings.activeLibraryId = id;
   saveSettings(settings);
   return true;
@@ -1219,6 +1527,8 @@ app.listen(PORT, '127.0.0.1', () => {
   console.log(`\nvideoref server running on port ${PORT}`);
   console.log(`   Library : ${LIBRARY_PATH}`);
   console.log(`   Thumbs  : ${THUMB_DIR}`);
+  // 永続化済みウォッチフォルダを再開（不正なフォルダがあっても起動は止めない）
+  try { initWatchersFromSettings(); } catch (e) { console.error('[watch] init failed:', e.message); }
   // Electronメインプロセスへポートを通知
   if (process.send) process.send({ type: 'ready', port: PORT });
 });
