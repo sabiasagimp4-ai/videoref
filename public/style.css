@@ -185,6 +185,9 @@ kbd {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 16px; cursor: pointer; color: var(--text-2);
   font-size: 13px; border-radius: 0; transition: all 0.1s;
+  /* <button class="nav-item"> のブラウザ既定（背景/枠/中央寄せ/別フォント）をリセットして <div> と揃える */
+  width: 100%; background: none; border: none; text-align: left;
+  font-family: inherit; box-sizing: border-box;
 }
 .nav-item:hover { background: var(--bg-3); color: var(--text-1); }
 .nav-item.active { background: var(--accent-dim); color: var(--accent); }
@@ -611,53 +614,34 @@ kbd {
 .modal-close:hover { color: var(--text-1); }
 #modal-video { width: 100%; max-height: calc(70vh); background: #000; display: block; }
 
-/* ===== PLAYER CONTROLS (video modal) ===== */
+/* ===== PLAYER CONTROLS (video modal) — 再生ボタン＋シークバー ===== */
 #player-controls {
   background: var(--bg-2); border-top: 1px solid var(--border);
-  padding: 8px 12px; display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 14px; display: flex; flex-direction: column; gap: 8px;
 }
-.pc-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.pc-btn {
-  background: var(--bg-3); border: 1px solid var(--border); color: var(--text-2);
-  font-size: 12px; padding: 4px 10px; border-radius: var(--radius-sm); cursor: pointer;
-  transition: all 0.1s; white-space: nowrap;
+.pc-row { display: flex; align-items: center; gap: 12px; }
+.pc-play-btn {
+  background: var(--accent); color: #fff; border: none; flex-shrink: 0;
+  width: 40px; height: 40px; border-radius: 50%; font-size: 15px; line-height: 1;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: filter 0.1s, transform 0.08s;
 }
-.pc-btn:hover { background: var(--bg-4); color: var(--text-1); border-color: var(--border-light); }
-.pc-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
-#pc-speed {
-  background: var(--bg-3); border: 1px solid var(--border); color: var(--text-2);
-  font-size: 12px; padding: 4px 6px; border-radius: var(--radius-sm); outline: none; cursor: pointer;
+.pc-play-btn:hover { filter: brightness(1.12); }
+.pc-play-btn:active { transform: scale(0.93); }
+.pc-time {
+  font-size: 11px; color: var(--text-3); font-family: monospace;
+  min-width: 36px; text-align: center; flex-shrink: 0;
 }
-.pc-sep { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
-.pc-loop-label { font-size: 11px; color: var(--text-3); font-family: monospace; min-width: 40px; }
-
-.pc-timeline {
-  position: relative; height: 10px; background: var(--bg-4);
-  border-radius: 5px; cursor: pointer; overflow: visible;
+.pc-seek {
+  position: relative; flex: 1; height: 6px; background: var(--bg-4);
+  border-radius: 3px; cursor: pointer;
 }
-.pc-timeline-fill {
-  position: absolute; top: 0; left: 0; height: 100%; width: 0%;
-  background: var(--accent); border-radius: 5px; pointer-events: none;
+.pc-seek:hover { height: 8px; }
+.pc-seek-fill {
+  position: absolute; left: 0; top: 0; height: 100%; width: 0%;
+  background: var(--accent); border-radius: 3px; pointer-events: none;
 }
-.pc-loop-range {
-  position: absolute; top: 0; height: 100%;
-  background: rgba(255, 197, 46, 0.35); border-left: 2px solid var(--yellow); border-right: 2px solid var(--yellow);
-  pointer-events: none;
-}
-.pc-timeline-tooltip {
-  position: absolute; bottom: 100%; transform: translateX(-50%); margin-bottom: 8px;
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  pointer-events: none; z-index: 20;
-}
-#pc-preview-video {
-  width: 120px; height: 67px; object-fit: cover; background: #000;
-  border-radius: var(--radius-sm); border: 1px solid var(--border-light);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.6);
-}
-#pc-timeline-time {
-  background: rgba(0,0,0,0.85); color: #fff; font-size: 11px; font-family: monospace;
-  padding: 2px 7px; border-radius: 10px;
-}
+.pc-hint { font-size: 11px; color: var(--text-3); line-height: 1.5; }
 
 /* ===== QUICK LOOK ===== */
 #quicklook-overlay {

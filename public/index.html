@@ -244,35 +244,17 @@
         <button id="modal-eyedropper-btn" class="palette-tool-btn" title="フレームからスポイト" style="margin-right:8px">💉 スポイト</button>
         <button class="modal-close" id="video-modal-close">✕</button>
       </div>
-      <video id="modal-video" controls autoplay></video>
+      <video id="modal-video" autoplay></video>
       <div id="player-controls">
         <div class="pc-row">
-          <button id="pc-prev-frame" class="pc-btn" title="前のフレーム (,)">⏮</button>
-          <button id="pc-next-frame" class="pc-btn" title="次のフレーム (.)">⏭</button>
-          <select id="pc-speed" title="再生速度">
-            <option value="0.25">0.25x</option>
-            <option value="0.5">0.5x</option>
-            <option value="1" selected>1x</option>
-            <option value="1.5">1.5x</option>
-            <option value="2">2x</option>
-            <option value="4">4x</option>
-          </select>
-          <span class="pc-sep"></span>
-          <button id="pc-set-in" class="pc-btn" title="区間IN設定">IN</button>
-          <button id="pc-set-out" class="pc-btn" title="区間OUT設定">OUT</button>
-          <button id="pc-loop-toggle" class="pc-btn" title="区間ループ ON/OFF">🔁 Loop</button>
-          <button id="pc-clear-loop" class="pc-btn" title="区間をクリア">✕区間</button>
-          <span id="pc-in-label" class="pc-loop-label"></span>
-          <span id="pc-out-label" class="pc-loop-label"></span>
-        </div>
-        <div id="pc-timeline" class="pc-timeline">
-          <div id="pc-timeline-fill" class="pc-timeline-fill"></div>
-          <div id="pc-loop-range" class="pc-loop-range hidden"></div>
-          <div id="pc-timeline-tooltip" class="pc-timeline-tooltip hidden">
-            <video id="pc-preview-video" muted preload="metadata"></video>
-            <span id="pc-timeline-time">0:00</span>
+          <button id="pc-play" class="pc-play-btn" title="再生 / 一時停止 (Space)">⏸</button>
+          <span id="pc-cur" class="pc-time">0:00</span>
+          <div id="pc-seek" class="pc-seek" title="クリック / ドラッグでシーク">
+            <div id="pc-seek-fill" class="pc-seek-fill"></div>
           </div>
+          <span id="pc-dur" class="pc-time">0:00</span>
         </div>
+        <span class="pc-hint">Space 再生/停止　[ ] コマ送り　Shift+[ ] 10コマ　Ctrl+←→ 5秒送り　Shift+, . 速度　Shift+R 回転　F 全画面</span>
       </div>
       <div id="video-ctx-menu" class="hidden">
         <div class="ctx-item" data-action="copy-frame">📸 現在のフレームをコピー</div>

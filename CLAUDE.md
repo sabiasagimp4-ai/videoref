@@ -1,31 +1,18 @@
 # videoref — CLAUDE.md
 
-動画リファレンス管理アプリ（Electron + Express）。
+動画リファレンス管理アプリ（Electron + Express）。リポジトリ: `github.com/sabiasagimp4-ai/videoref`
+
 詳細なプロジェクトドキュメントは Obsidian vault の以下ファイルを参照：
 - `D:\obisidian\nicebase_v01\sabiasagi\00_SCRAPBOX\text\📦 videoref プロジェクト引き継ぎ.md`
 - `D:\obisidian\nicebase_v01\sabiasagi\00_SCRAPBOX\text\🔍 見つかった問題点（総合レビュー）.md`
 
----
+開発ディレクトリ: `D:\自作拡張機能\videoref_dev`
 
-## 重要な注意事項
-
-### PowerShell で JS ファイルを直接編集すると日本語が文字化けする
-必ず以下を使う:
-```powershell
-[System.IO.File]::WriteAllText("path", $content, [System.Text.UTF8Encoding]::new($false))
-```
-
-### dist への反映が必要
-`D:\claude\eagle-app-exe\` で編集後、`dist\win-unpacked\resources\app\` にコピーしないとEXEに反映されない。
-
-### リリース手順
-package.json の version を上げてから:
-```powershell
-git add . && git commit -m "vX.X.X: 内容"
-git tag vX.X.X
-git push origin main && git push origin vX.X.X
-```
-タグとversionが一致しないとexeがReleaseにアップロードされない。
+詳細な運用ルールは `.claude/rules/` を参照：
+- [`.claude/rules/encoding.md`](.claude/rules/encoding.md) — 日本語ファイル編集時の文字化け対策
+- [`.claude/rules/architecture.md`](.claude/rules/architecture.md) — 3層構成の責務
+- [`.claude/rules/release.md`](.claude/rules/release.md) — ビルド・リリース手順
+- [`.claude/rules/code-review-graph.md`](.claude/rules/code-review-graph.md) — グラフ優先のコード探索
 
 ---
 
@@ -46,7 +33,7 @@ public/
 ## 起動
 
 ```powershell
-cd D:\claude\eagle-app-exe
+cd D:\自作拡張機能\videoref_dev
 npx electron .
 ```
 
@@ -73,3 +60,42 @@ Low優先度（🔍ファイル参照）:
 - F2: chokidar ファイル監視
 - F3: バッチ操作
 - F4: SQLite DB化
+
+<!-- code-review-graph MCP tools -->
+## MCP Tools: code-review-graph
+
+**IMPORTANT: This project has a knowledge graph. ALWAYS use the
+code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
+the codebase.** The graph is faster, cheaper (fewer tokens), and gives
+you structural context (callers, dependents, test coverage) that file
+scanning cannot.
+
+### When to use graph tools FIRST
+
+- **Exploring code**: `semantic_search_nodes` or `query_graph` instead of Grep
+- **Understanding impact**: `get_impact_radius` instead of manually tracing imports
+- **Code review**: `detect_changes` + `get_review_context` instead of reading entire files
+- **Finding relationships**: `query_graph` with callers_of/callees_of/imports_of/tests_for
+- **Architecture questions**: `get_architecture_overview` + `list_communities`
+
+Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
+
+### Key Tools
+
+| Tool | Use when |
+| ------ | ---------- |
+| `detect_changes` | Reviewing code changes — gives risk-scored analysis |
+| `get_review_context` | Need source snippets for review — token-efficient |
+| `get_impact_radius` | Understanding blast radius of a change |
+| `get_affected_flows` | Finding which execution paths are impacted |
+| `query_graph` | Tracing callers, callees, imports, tests, dependencies |
+| `semantic_search_nodes` | Finding functions/classes by name or keyword |
+| `get_architecture_overview` | Understanding high-level codebase structure |
+| `refactor_tool` | Planning renames, finding dead code |
+
+### Workflow
+
+1. The graph auto-updates on file changes (via hooks).
+2. Use `detect_changes` for code review.
+3. Use `get_affected_flows` to understand impact.
+4. Use `query_graph` pattern="tests_for" to check coverage.

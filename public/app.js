@@ -24,9 +24,7 @@ const state = {
   grayscale: false,
   player: {
     fps: 30,
-    loopIn: null,
-    loopOut: null,
-    looping: false,
+    rotation: 0,
   },
 };
 
@@ -621,32 +619,24 @@ function autoSave() {
 // ===== VIDEO MODAL =====
 function openVideoModal(file) {
   document.getElementById('modal-title').textContent = file.name;
-  document.getElementById('modal-video').src = '/api/video/' + file.id;
-  document.getElementById('video-modal').classList.remove('hidden');
   const vid = document.getElementById('modal-video');
+  vid.src = '/api/video/' + file.id;
+  vid.style.transform = '';
   vid.playbackRate = 1;
-  const speedSel = document.getElementById('pc-speed');
-  if (speedSel) speedSel.value = '1';
   // フレームステップ用fps（メタデータにあれば使用、無ければ既定30）
   state.player.fps = (file && file.fps) ? file.fps : 30;
-  state.player.loopIn = null;
-  state.player.loopOut = null;
-  state.player.looping = false;
-  updateLoopUI();
+  state.player.rotation = 0;
+  document.getElementById('video-modal').classList.remove('hidden');
   vid.play().catch(function() {});
 }
 
 function closeVideoModal() {
-  // プレイヤー状態をリセット
-  state.player.loopIn = null;
-  state.player.loopOut = null;
-  state.player.looping = false;
-  updateLoopUI();
-  const loopBtn = document.getElementById('pc-loop-toggle');
-  if (loopBtn) loopBtn.classList.remove('active');
   const vid = document.getElementById('modal-video');
   vid.pause();
   vid.src = '';
+  vid.style.transform = '';
+  state.player.rotation = 0;
+  if (document.fullscreenElement) document.exitFullscreen().catch(function() {});
   document.getElementById('video-modal').classList.add('hidden');
 }
 
@@ -1457,6 +1447,16 @@ function applyGrayscale(on) {
 }
 
 function initUI() {
+  // --- スコープ橋渡し ---
+  // 以下の関数は歴史的経緯で initUI 内に宣言されているが、グローバルスコープの
+  // 関数（loadFiles / openInspector / saveMeta など）からも呼ばれる。bare name 解決は
+  // window を辿るため、ここで window に別名を張ることで ReferenceError を防ぐ。
+  // （関数オブジェクト自体は同一でクロージャも保持されるため動作は完全に正しい）
+  window.showToast = showToast;
+  window.loadCollections = loadCollections;
+  window.renderCollections = renderCollections;
+  window.renderPalette = renderPalette;
+
   loadUIState();
 
   // Apply restored state to DOM
@@ -1670,141 +1670,107 @@ videoCtxMenu.addEventListener('click', async function(e) {
   }
 });
 
-// ===== PLAYER CONTROLS (speed / frame step / segment loop / hover-scrub) =====
-function formatTimeShort(t) {
-  if (!isFinite(t) || t < 0) t = 0;
-  const m = Math.floor(t / 60);
-  const s = Math.floor(t % 60);
-  return m + ':' + (s < 10 ? '0' : '') + s;
+// ===== PLAYER CONTROLS — UIは再生ボタンのみ。他はEagle準拠キーボードショートカット =====
+const SPEED_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 4, 8];
+
+function togglePlay() {
+  if (!modalVideo || !modalVideo.src) return;
+  if (modalVideo.paused) modalVideo.play().catch(function() {});
+  else modalVideo.pause();
 }
 
-function updateLoopUI() {
-  const inLabel = document.getElementById('pc-in-label');
-  const outLabel = document.getElementById('pc-out-label');
-  const range = document.getElementById('pc-loop-range');
-  if (inLabel) inLabel.textContent = state.player.loopIn != null ? 'IN ' + formatTimeShort(state.player.loopIn) : '';
-  if (outLabel) outLabel.textContent = state.player.loopOut != null ? 'OUT ' + formatTimeShort(state.player.loopOut) : '';
-  if (range) {
-    const dur = modalVideo.duration;
-    if (state.player.loopIn != null && state.player.loopOut != null && dur && isFinite(dur) && dur > 0) {
-      const leftPct = (state.player.loopIn / dur) * 100;
-      const widthPct = ((state.player.loopOut - state.player.loopIn) / dur) * 100;
-      range.style.left = leftPct + '%';
-      range.style.width = Math.max(widthPct, 0) + '%';
-      range.classList.remove('hidden');
-    } else {
-      range.classList.add('hidden');
-    }
-  }
-}
-
+// フレーム単位ステップ送り（Eagle: [ ] = ±1, Shift+[ ] = ±10）
 function stepModalFrame(dir) {
   if (!modalVideo || !modalVideo.src) return;
   modalVideo.pause();
   const step = 1 / (state.player.fps || 30);
-  modalVideo.currentTime = Math.max(0, modalVideo.currentTime + dir * step);
+  const next = modalVideo.currentTime + dir * step;
+  const dur = (modalVideo.duration && isFinite(modalVideo.duration)) ? modalVideo.duration : Infinity;
+  modalVideo.currentTime = Math.min(dur, Math.max(0, next));
+}
+
+// 5秒送り/戻し（Eagle: Ctrl+←→）
+function seekModal(sec) {
+  if (!modalVideo || !modalVideo.src) return;
+  const dur = (modalVideo.duration && isFinite(modalVideo.duration)) ? modalVideo.duration : Infinity;
+  modalVideo.currentTime = Math.min(dur, Math.max(0, modalVideo.currentTime + sec));
+}
+
+// 再生速度変更（Eagle: Shift+, / Shift+. で 0.25x〜8x）
+function changeSpeed(dir) {
+  if (!modalVideo) return;
+  let i = SPEED_STEPS.indexOf(modalVideo.playbackRate);
+  if (i === -1) i = SPEED_STEPS.indexOf(1);
+  i = Math.min(SPEED_STEPS.length - 1, Math.max(0, i + dir));
+  modalVideo.playbackRate = SPEED_STEPS[i];
+  showToast('速度 ' + SPEED_STEPS[i] + 'x');
+}
+
+// 回転（Eagle: Shift+R）
+function rotateModal() {
+  if (!modalVideo) return;
+  state.player.rotation = ((state.player.rotation || 0) + 90) % 360;
+  modalVideo.style.transform = state.player.rotation ? 'rotate(' + state.player.rotation + 'deg)' : '';
+  showToast('回転 ' + state.player.rotation + '°');
+}
+
+// 全画面（Eagle: F5 → ここでは F）
+function toggleFullscreenModal() {
+  if (!modalVideo) return;
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(function() {});
+  } else if (modalVideo.requestFullscreen) {
+    modalVideo.requestFullscreen().catch(function() {});
+  }
+}
+
+function fmtTime(t) {
+  if (!isFinite(t) || t < 0) t = 0;
+  const m = Math.floor(t / 60), s = Math.floor(t % 60);
+  return m + ':' + (s < 10 ? '0' : '') + s;
 }
 
 (function initPlayerControls() {
-  const speedSel = document.getElementById('pc-speed');
-  const prevFrameBtn = document.getElementById('pc-prev-frame');
-  const nextFrameBtn = document.getElementById('pc-next-frame');
-  const setInBtn = document.getElementById('pc-set-in');
-  const setOutBtn = document.getElementById('pc-set-out');
-  const loopToggleBtn = document.getElementById('pc-loop-toggle');
-  const clearLoopBtn = document.getElementById('pc-clear-loop');
-  const timeline = document.getElementById('pc-timeline');
-  const timelineFill = document.getElementById('pc-timeline-fill');
-  const tooltip = document.getElementById('pc-timeline-tooltip');
-  const tooltipTime = document.getElementById('pc-timeline-time');
-  const previewVideo = document.getElementById('pc-preview-video');
-  if (!speedSel || !timeline) return; // markup not present; no-op safely
+  const playBtn = document.getElementById('pc-play');
+  if (!playBtn || !modalVideo) return;
+  playBtn.addEventListener('click', togglePlay);
+  modalVideo.addEventListener('play', function() { playBtn.textContent = '⏸'; });
+  modalVideo.addEventListener('pause', function() { playBtn.textContent = '▶'; });
 
-  speedSel.addEventListener('change', function() {
-    modalVideo.playbackRate = parseFloat(speedSel.value) || 1;
-  });
-
-  if (prevFrameBtn) prevFrameBtn.addEventListener('click', function() { stepModalFrame(-1); });
-  if (nextFrameBtn) nextFrameBtn.addEventListener('click', function() { stepModalFrame(1); });
-
-  if (setInBtn) setInBtn.addEventListener('click', function() {
-    state.player.loopIn = modalVideo.currentTime;
-    if (state.player.loopOut != null && state.player.loopIn >= state.player.loopOut) state.player.loopOut = null;
-    updateLoopUI();
-  });
-  if (setOutBtn) setOutBtn.addEventListener('click', function() {
-    state.player.loopOut = modalVideo.currentTime;
-    if (state.player.loopIn != null && state.player.loopOut <= state.player.loopIn) state.player.loopIn = null;
-    updateLoopUI();
-  });
-  if (clearLoopBtn) clearLoopBtn.addEventListener('click', function() {
-    state.player.loopIn = null;
-    state.player.loopOut = null;
-    updateLoopUI();
-  });
-  if (loopToggleBtn) loopToggleBtn.addEventListener('click', function() {
-    state.player.looping = !state.player.looping;
-    loopToggleBtn.classList.toggle('active', state.player.looping);
-  });
+  // シークバー（再生位置の表示＋クリック/ドラッグでシーク）
+  const seek = document.getElementById('pc-seek');
+  const seekFill = document.getElementById('pc-seek-fill');
+  const curEl = document.getElementById('pc-cur');
+  const durEl = document.getElementById('pc-dur');
 
   modalVideo.addEventListener('timeupdate', function() {
-    // タイムラインの進捗バー更新
-    const dur = modalVideo.duration;
-    if (dur && isFinite(dur) && dur > 0 && timelineFill) {
-      timelineFill.style.width = (modalVideo.currentTime / dur * 100) + '%';
-    }
-    // 区間ループ
-    if (state.player.looping && state.player.loopIn != null && state.player.loopOut != null) {
-      if (modalVideo.currentTime >= state.player.loopOut) {
-        modalVideo.currentTime = state.player.loopIn;
-      } else if (modalVideo.currentTime < state.player.loopIn) {
-        modalVideo.currentTime = state.player.loopIn;
-      }
+    const d = modalVideo.duration;
+    if (d && isFinite(d) && d > 0) {
+      if (seekFill) seekFill.style.width = (modalVideo.currentTime / d * 100) + '%';
+      if (curEl) curEl.textContent = fmtTime(modalVideo.currentTime);
     }
   });
-  modalVideo.addEventListener('loadedmetadata', updateLoopUI);
+  modalVideo.addEventListener('loadedmetadata', function() {
+    if (durEl) durEl.textContent = fmtTime(modalVideo.duration);
+    if (curEl) curEl.textContent = '0:00';
+    if (seekFill) seekFill.style.width = '0%';
+  });
 
-  // ホバースクラブ：タイムタイムライン上でマウス位置のタイムスタンプ＋プレビュー動画
-  let previewFailed = false;
-  timeline.addEventListener('mousemove', function(e) {
-    const dur = modalVideo.duration;
-    if (!dur || !isFinite(dur) || dur <= 0) return;
-    const rect = timeline.getBoundingClientRect();
-    let ratio = (e.clientX - rect.left) / rect.width;
+  function seekTo(clientX) {
+    const d = modalVideo.duration;
+    if (!d || !isFinite(d) || d <= 0 || !seek) return;
+    const rect = seek.getBoundingClientRect();
+    let ratio = (clientX - rect.left) / rect.width;
     ratio = Math.min(1, Math.max(0, ratio));
-    const t = ratio * dur;
-    if (tooltipTime) tooltipTime.textContent = formatTimeShort(t);
-    if (tooltip) {
-      tooltip.style.left = (ratio * rect.width) + 'px';
-      tooltip.classList.remove('hidden');
-    }
-    if (previewVideo && !previewFailed) {
-      try {
-        if (!previewVideo.src) previewVideo.src = modalVideo.currentSrc || modalVideo.src;
-        previewVideo.currentTime = t;
-      } catch (err) {
-        previewFailed = true;
-        previewVideo.style.display = 'none';
-      }
-    }
-  });
-  if (previewVideo) {
-    previewVideo.addEventListener('error', function() {
-      previewFailed = true;
-      previewVideo.style.display = 'none';
-    });
+    modalVideo.currentTime = ratio * d;
+    if (seekFill) seekFill.style.width = (ratio * 100) + '%';
   }
-  timeline.addEventListener('mouseleave', function() {
-    if (tooltip) tooltip.classList.add('hidden');
-  });
-  timeline.addEventListener('click', function(e) {
-    const dur = modalVideo.duration;
-    if (!dur || !isFinite(dur) || dur <= 0) return;
-    const rect = timeline.getBoundingClientRect();
-    let ratio = (e.clientX - rect.left) / rect.width;
-    ratio = Math.min(1, Math.max(0, ratio));
-    modalVideo.currentTime = ratio * dur;
-  });
+  if (seek) {
+    let dragging = false;
+    seek.addEventListener('mousedown', function(e) { dragging = true; seekTo(e.clientX); e.preventDefault(); });
+    document.addEventListener('mousemove', function(e) { if (dragging) seekTo(e.clientX); });
+    document.addEventListener('mouseup', function() { dragging = false; });
+  }
 })();
 
 // ===== TOAST =====
@@ -2425,6 +2391,23 @@ document.addEventListener('keydown', function(e) {
   // モーダルが開いているときは矢印系だけ抑制
   const modalOpen = !document.getElementById('video-modal').classList.contains('hidden');
 
+  // ===== 動画モーダル: Eagle準拠ショートカット（UIは再生ボタンのみ）=====
+  if (modalOpen) {
+    switch (e.code) {
+      case 'Space':        e.preventDefault(); togglePlay(); return;
+      case 'BracketLeft':  e.preventDefault(); stepModalFrame(e.shiftKey ? -10 : -1); return;
+      case 'BracketRight': e.preventDefault(); stepModalFrame(e.shiftKey ? 10 : 1); return;
+      case 'ArrowLeft':    if (e.ctrlKey) { e.preventDefault(); seekModal(-5); } return;
+      case 'ArrowRight':   if (e.ctrlKey) { e.preventDefault(); seekModal(5); } return;
+      case 'Comma':        if (e.shiftKey) { e.preventDefault(); changeSpeed(-1); } return;
+      case 'Period':       if (e.shiftKey) { e.preventDefault(); changeSpeed(1); } return;
+      case 'KeyR':         if (e.shiftKey) { e.preventDefault(); rotateModal(); } return;
+      case 'KeyF':         e.preventDefault(); toggleFullscreenModal(); return;
+      case 'Escape':       e.preventDefault(); closeVideoModal(); return;
+    }
+    return; // モーダル表示中は他キーを抑制
+  }
+
   switch (e.key) {
     case 'ArrowLeft':
     case 'ArrowRight': {
@@ -2452,10 +2435,6 @@ document.addEventListener('keydown', function(e) {
       if (quickLookOpen()) {
         e.preventDefault();
         closeQuickLook();
-      } else if (modalOpen) {
-        e.preventDefault();
-        const v = document.getElementById('modal-video');
-        v.paused ? v.play() : v.pause();
       } else {
         const inspectorContent = document.getElementById('inspector-content');
         const inspectorIsOpen = inspectorContent && !inspectorContent.classList.contains('hidden');
@@ -2469,12 +2448,6 @@ document.addEventListener('keydown', function(e) {
           openQuickLook(state.selected);
         }
       }
-      break;
-    case ',':
-      if (modalOpen) { e.preventDefault(); stepModalFrame(-1); }
-      break;
-    case '.':
-      if (modalOpen) { e.preventDefault(); stepModalFrame(1); }
       break;
     case 'Enter':
       if (!modalOpen && state.selected) { e.preventDefault(); openVideoModal(state.selected); }
